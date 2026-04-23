@@ -84,6 +84,17 @@ const removeQuestion = (idx) => {
 };
 
 // --- Methods ---
+const playSound = (type) => {
+  const sounds = {
+    click: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3',
+    success: 'https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3',
+    alarm: 'https://assets.mixkit.co/active_storage/sfx/2190/2190-preview.mp3'
+  };
+  const audio = new Audio(sounds[type]);
+  audio.volume = 0.4;
+  audio.play().catch(() => {}); // Browsers often block auto-play until interaction
+};
+
 const updateTime = () => {
   currentTime.value = new Date();
   if (isCountdownMode.value) {
@@ -93,6 +104,7 @@ const updateTime = () => {
 };
 
 const toggleCountdown = () => {
+  playSound('click');
   isCountdownMode.value = !isCountdownMode.value;
   if (isCountdownMode.value) {
     // Reset countdown based on current exam's end time
@@ -158,6 +170,7 @@ const addExamToList = () => {
       endTime: endTime,
       invigilator: invigilator.value || '尚未設定'
     });
+    playSound('success');
     // 清空輸入框以方便下一筆輸入
     examSubject.value = '';
   }
@@ -185,6 +198,7 @@ const startDraw = () => {
       clearInterval(interval);
       isDrawing.value = false;
       if (excludeWinner.value) {
+          playSound('success');
         namesInput.value = list.filter(n => n !== drawnResult.value).join('\n');
       }
     }
@@ -202,6 +216,7 @@ const resetScores = () => {
 };
 
 const updateScore = (index, val) => {
+  playSound('click');
   groups.value[index].score += val;
 };
 
@@ -215,6 +230,7 @@ const setPresentationTime = (mins) => {
 };
 
 const togglePresentationTimer = () => {
+  playSound('click');
   if (isPresentationRunning.value) {
     clearInterval(presentationInterval);
   } else {
@@ -223,6 +239,7 @@ const togglePresentationTimer = () => {
         presentationSeconds.value--;
       } else {
         clearInterval(presentationInterval);
+        playSound('alarm');
         isPresentationRunning.value = false;
         isTimerFlashing.value = true;
       }
@@ -233,6 +250,7 @@ const togglePresentationTimer = () => {
 
 // Quiz Methods
 const submitQuiz = () => {
+  playSound('success');
   let correctCount = 0;
   quizQuestions.value.forEach(q => {
     if (q.type === 'multiple') {
@@ -249,6 +267,7 @@ const submitQuiz = () => {
 };
 
 const resetQuiz = () => {
+  playSound('click');
   quizQuestions.value.forEach(q => {
     q.userAnswer = q.type === 'multiple' ? [] : null;
   });
@@ -286,15 +305,15 @@ onUnmounted(() => {
       </div>
       <div class="header-center">
         <nav class="tab-nav">
-          <button @click="activeTab = 'exam'" :class="{ active: activeTab === 'exam' }">
+          <button @click="activeTab = 'exam'; playSound('click')" :class="{ active: activeTab === 'exam' }">
             <ruby v-if="showZhuyin">考試系統<rt>ㄎㄠˇ ㄕˋ ㄒㄧˋ ㄊㄨㄥˇ</rt></ruby>
             <span v-else>考試系統</span>
           </button>
-          <button @click="activeTab = 'quiz'" :class="{ active: activeTab === 'quiz' }">
+          <button @click="activeTab = 'quiz'; playSound('click')" :class="{ active: activeTab === 'quiz' }">
             <ruby v-if="showZhuyin">測驗卷<rt>ㄘㄜˋ ㄧㄢˋ ㄐㄩㄢˋ</rt></ruby>
             <span v-else>測驗卷</span>
           </button>
-          <button @click="activeTab = 'tools'" :class="{ active: activeTab === 'tools' }">
+          <button @click="activeTab = 'tools'; playSound('click')" :class="{ active: activeTab === 'tools' }">
             <ruby v-if="showZhuyin">互動工具<rt>ㄏㄨˋ ㄉㄨㄥˋ ㄍㄨㄥ ㄐㄩˋ</rt></ruby>
             <span v-else>互動工具</span>
           </button>
@@ -303,6 +322,7 @@ onUnmounted(() => {
       <div class="header-right"></div> <!-- Spacer for centering -->
     </header>
 
+    <transition name="fade" mode="out-in">
     <main class="container" v-if="activeTab === 'exam'">
       <!-- Tool Buttons -->
       <div class="button-group">
@@ -394,7 +414,7 @@ onUnmounted(() => {
                 <th><ruby v-if="showZhuyin">操作<rt>ㄘㄠ ㄗㄨㄛˋ</rt></ruby><span v-else>操作</span></th>
               </tr>
             </thead>
-            <tbody>
+            <transition-group name="list" tag="tbody">
               <tr v-for="(item, index) in examList" :key="index">
                 <td>{{ item.subject }}</td>
                 <td>{{ item.startTime }}</td>
@@ -404,14 +424,14 @@ onUnmounted(() => {
                   <button @click="removeExam(index)" class="delete-btn">刪除</button>
                 </td>
               </tr>
-            </tbody>
+            </transition-group>
           </table>
         </div>
       </div>
     </main>
 
     <main class="container" v-else-if="activeTab === 'quiz'">
-      <div class="quiz-header">
+      <div class="quiz-header dashboard-card">
         <h2>
           <ruby v-if="showZhuyin">數位互動測驗卷<rt>ㄕㄨˋ ㄨㄟˋ ㄏㄨˋ ㄉㄨㄥˋ ㄘㄜˋ ㄧㄢˋ ㄐㄩㄢˋ</rt></ruby>
           <span v-else>數位互動測驗卷</span>
@@ -531,17 +551,19 @@ onUnmounted(() => {
             <button @click="addGroup" class="tool-btn-sm">+ 新增小組</button>
             <button @click="resetScores" class="tool-btn-sm reset-btn">重設分數</button>
           </div>
-          <div class="score-list">
+          <transition-group name="list" tag="div" class="score-list">
             <div v-for="(group, idx) in groups" :key="idx" class="score-item">
-              <input v-model="group.name" class="group-name-input" />
-              <div class="score-actions">
-                <button @click="updateScore(idx, -1)">-1</button>
+              <div class="score-main">
+                <input v-model="group.name" class="group-name-input" />
                 <span class="score-val">{{ group.score }}</span>
-                <button @click="updateScore(idx, 1)">+1</button>
-                <button @click="updateScore(idx, 5)">+5</button>
+              </div>
+              <div class="score-actions">
+                <button @click="updateScore(idx, -1)" class="btn-sub">-1</button>
+                <button @click="updateScore(idx, 1)" class="btn-add">+1</button>
+                <button @click="updateScore(idx, 5)" class="btn-add-lg">+5</button>
               </div>
             </div>
-          </div>
+          </transition-group>
           <div class="ranking-preview">
             <strong>目前領先：</strong> {{ sortedGroups[0]?.name }} ({{ sortedGroups[0]?.score }})
           </div>
@@ -565,85 +587,106 @@ onUnmounted(() => {
       </div>
 
       <!-- Real-time Ranking Table -->
-      <div class="list-section">
+      <div class="ranking-section">
         <div class="list-card">
-          <h3><ruby v-if="showZhuyin">即時排行榜<rt>ㄐㄧˊ ㄕˊ ㄆㄞˊ ㄏㄤˊ ㄅㄤˇ</rt></ruby><span v-else>即時排行榜</span></h3>
-          <table class="exam-table">
-            <thead>
-              <tr>
-                <th><ruby v-if="showZhuyin">排名<rt>ㄆㄞˊ ㄇㄧㄥˊ</rt></ruby><span v-else>排名</span></th>
-                <th><ruby v-if="showZhuyin">組別名稱<rt>ㄗㄨˇ ㄅㄧㄝˊ ㄇㄧㄥˊ ㄔㄥ</rt></ruby><span v-else>組別名稱</span></th>
-                <th><ruby v-if="showZhuyin">總分<rt>ㄗㄨˇ ㄈㄣ</rt></ruby><span v-else>總分</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(group, index) in sortedGroups" :key="index">
-                <td>{{ index + 1 }}</td>
-                <td>{{ group.name }}</td>
-                <td>{{ group.score }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <h3 class="ranking-title"><ruby v-if="showZhuyin">即時排行榜<rt>ㄐㄧˊ ㄕˊ ㄆㄞˊ ㄏㄤˊ ㄅㄤˇ</rt></ruby><span v-else>即時排行榜</span></h3>
+          <transition-group name="list" tag="div" class="ranking-grid">
+            <div v-for="(group, index) in sortedGroups" :key="index" class="rank-card" :class="'rank-' + (index + 1)">
+              <div class="rank-badge">
+                <span class="rank-num">{{ index + 1 }}</span>
+              </div>
+              <div class="rank-info">
+                <span class="rank-name">{{ group.name }}</span>
+              </div>
+              <div class="rank-score-pill">
+                <span class="score-num">{{ group.score }}</span>
+                <span class="unit">pts</span>
+              </div>
+            </div>
+          </transition-group>
         </div>
       </div>
     </main>
+    </transition>
   </div>
 </template>
 
 <style scoped>
 .app-wrapper {
   min-height: 100vh;
+  font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  transition: background-color 0.4s ease, color 0.4s ease;
 }
 
 .light-mode {
-  background-color: #ffffff;
-  color: #000000;
+  background-color: #f8f9fa;
+  color: #212529;
 }
 
 .dark-mode {
-  background-color: #000000;
-  color: #ffffff;
+  background-color: #121212;
+  color: #e9ecef;
 }
 
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 2rem;
-  border-bottom: 1px solid #ccc;
+  padding: 0.75rem 2rem;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+.dark-mode .header {
+  background: rgba(30, 30, 30, 0.8);
+  border-bottom-color: rgba(255,255,255,0.1);
 }
 
 .tab-nav {
   display: flex;
-  gap: 1rem;
+  gap: 0.5rem;
 }
 
 .tab-nav button {
-  padding: 0.5rem 1.5rem;
+  padding: 0.6rem 1.2rem;
   border: none;
   background: none;
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   font-weight: bold;
   cursor: pointer;
-  color: #666;
-  border-bottom: 3px solid transparent;
+  color: #adb5bd;
+  transition: all 0.3s ease;
 }
-
 .tab-nav button.active {
   color: #007bff;
-  border-bottom-color: #007bff;
+  position: relative;
+}
+.tab-nav button.active::after {
+  content: '';
+  position: absolute;
+  bottom: -5px;
+  left: 20%;
+  width: 60%;
+  height: 4px;
+  background: #007bff;
+  border-radius: 2px;
 }
 
 .header-left, .header-right { flex: 1; }
 .title { flex: 2; text-align: center; font-size: 1.5rem; margin: 0; }
 
 .nav-button {
-  background: #007bff;
+  background: linear-gradient(135deg, #007bff, #0056b3);
   color: white;
   padding: 0.5rem 1rem;
-  border-radius: 4px;
+  border-radius: 8px;
   text-decoration: none;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
+  box-shadow: 0 4px 6px rgba(0, 123, 255, 0.2);
 }
 
 .container {
@@ -654,39 +697,66 @@ onUnmounted(() => {
 
 .button-group {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 1rem;
   margin-bottom: 2rem;
 }
 
 .tool-btn {
-  padding: 1rem;
+  padding: 0.8rem;
   cursor: pointer;
-  border: 1px solid #007bff;
-  background: transparent;
+  border: 1px solid rgba(0, 123, 255, 0.3);
+  background: white;
   color: inherit;
-  border-radius: 8px;
-  transition: background 0.2s;
-  font-weight: 500;
+  border-radius: 12px;
+  transition: all 0.3s ease;
+  font-weight: 600;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
 }
-.tool-btn:hover { background: rgba(0, 123, 255, 0.1); }
-.dark-mode .tool-btn { border-color: #4da3ff; }
+.dark-mode .tool-btn { background: #1e1e1e; border-color: #444; }
+.tool-btn:hover { 
+  background: #007bff; 
+  color: white; 
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.2);
+}
 
 .time-display {
   text-align: center;
-  margin: 3rem 0;
+  margin: 2rem 0;
   padding: 2rem;
-  border: 2px dashed #888;
-  border-radius: 15px;
+  background: linear-gradient(135deg, #ffffff, #f0f7ff);
+  border-radius: 24px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+  border: 1px solid rgba(0, 123, 255, 0.1);
 }
-.time-value { font-size: 4rem; font-weight: bold; font-family: monospace; }
+.dark-mode .time-display {
+  background: linear-gradient(135deg, #1e1e1e, #141e2a);
+  border-color: #333;
+}
+.time-value { 
+  font-size: 5rem; 
+  font-weight: 800; 
+  font-family: 'Courier New', monospace;
+  background: linear-gradient(to bottom, #007bff, #0056b3);
+  line-height: 1; /* Ensure text fits within its box */
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
 
 .info-section {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 2rem;
 }
-.input-card, .display-card { padding: 1.5rem; border: 1px solid #ddd; border-radius: 8px; }
+.input-card, .display-card { 
+  padding: 2rem; 
+  background: white;
+  border-radius: 16px; 
+  box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+  border: 1px solid #eee;
+}
+.dark-mode .input-card, .dark-mode .display-card { background: #1e1e1e; border-color: #333; }
 .form-group { margin-bottom: 1rem; }
 
 .form-group label { 
@@ -722,20 +792,20 @@ onUnmounted(() => {
   font-weight: bold;
 }
 
-.dark-mode .input-card, .dark-mode .display-card { border-color: #444; }
-
 .add-btn {
   width: 100%;
-  padding: 0.8rem;
-  background-color: #28a745;
+  padding: 1rem;
+  background: linear-gradient(135deg, #28a745, #218838);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   cursor: pointer;
   font-weight: bold;
   margin-top: 1rem;
+  box-shadow: 0 4px 10px rgba(40, 167, 69, 0.2);
 }
-.add-btn:hover { background-color: #218838; }
+.add-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 15px rgba(40, 167, 69, 0.3); }
+.add-btn:active { transform: scale(0.98); }
 
 .list-section { margin-top: 2rem; }
 .exam-table {
@@ -743,14 +813,23 @@ onUnmounted(() => {
   border-collapse: collapse;
   margin-top: 1rem;
 }
+.exam-table thead th {
+  background: #f8f9fa;
+  color: #666;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  letter-spacing: 0.5px;
+}
+.dark-mode .exam-table thead th { background: #2c2c2c; color: #aaa; }
 .exam-table th, .exam-table td {
-  border: 1px solid #ddd;
-  padding: 0.8rem;
+  padding: 1rem;
   text-align: center;
+  border-bottom: 1px solid #eee;
 }
-.dark-mode .exam-table th, .dark-mode .exam-table td {
-  border-color: #444;
-}
+.dark-mode .exam-table th, .dark-mode .exam-table td { border-color: #333; }
+
+.exam-table tr:hover { background: rgba(0, 123, 255, 0.02); }
+
 .delete-btn {
   background-color: #dc3545;
   color: white;
@@ -758,18 +837,177 @@ onUnmounted(() => {
   padding: 0.4rem 0.8rem;
   border-radius: 4px;
   cursor: pointer;
+  transition: background 0.2s;
 }
 .delete-btn:hover { background-color: #c82333; }
 
-.list-card { border: 1px solid #ddd; border-radius: 8px; padding: 1.5rem; }
+.list-card { 
+  background: #fff;
+  border: 1px solid #eee; 
+  border-radius: 12px; 
+  padding: 1.5rem; 
+  box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+}
 .dark-mode .list-card { border-color: #444; }
+
+/* Transitions */
+.fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+
+.list-enter-active, .list-leave-active { transition: all 0.5s ease; }
+.list-enter-from, .list-leave-to { opacity: 0; transform: translateX(30px); }
+.list-move { transition: transform 0.5s ease; }
 
 @media (max-width: 600px) {
   .time-value { font-size: 2.5rem; }
-  .header { flex-direction: column; gap: 1rem; }
+  .time-display { padding: 2rem 1rem; } /* Adjust padding for smaller screens */
 }
 
-/* Interactive Tools Enhancements */
+/* --- Quiz System Mobile Redesign --- */
+.quiz-header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.quiz-actions-top {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.score-badge {
+  background: #ffc107;
+  color: #000;
+  padding: 0.5rem 1.2rem;
+  border-radius: 20px;
+  font-weight: 800;
+  box-shadow: 0 4px 10px rgba(255, 193, 7, 0.3);
+}
+
+.quiz-card {
+  background: white;
+  border-radius: 20px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+  border: 1px solid #eee;
+  transition: transform 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+.dark-mode .quiz-card { background: #1e1e1e; border-color: #333; }
+
+.q-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.q-num { font-weight: 800; color: #007bff; font-size: 1.2rem; }
+.q-type-label { background: #e9ecef; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; color: #666; }
+.dark-mode .q-type-label { background: #333; color: #aaa; }
+
+.q-text {
+  font-size: 1.15rem;
+  font-weight: 600;
+  line-height: 1.5;
+  margin-bottom: 1.5rem;
+}
+
+.q-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.opt-label {
+  display: flex;
+  align-items: center;
+  padding: 1rem 1.2rem;
+  border: 2px solid #f1f3f5;
+  border-radius: 15px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 500;
+}
+.dark-mode .opt-label { border-color: #2c2c2c; }
+
+.opt-label:hover:not(.is-disabled) {
+  background: #f8f9fa;
+  border-color: #dee2e6;
+}
+.dark-mode .opt-label:hover:not(.is-disabled) { background: #252525; }
+
+.opt-label input { margin-right: 12px; transform: scale(1.2); }
+
+/* 選中狀態樣式 */
+.opt-label:has(input:checked) {
+  background: rgba(0, 123, 255, 0.05);
+  border-color: #007bff;
+  color: #007bff;
+}
+
+/* 回饋狀態 */
+.quiz-card.correct { border-left: 6px solid #28a745; background: #f4fff7; }
+.quiz-card.incorrect { border-left: 6px solid #dc3545; background: #fff5f5; }
+.dark-mode .quiz-card.correct { background: #142a1a; }
+.dark-mode .quiz-card.incorrect { background: #2a1414; }
+
+.q-feedback {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px dashed #ddd;
+  font-size: 0.95rem;
+}
+
+.submit-quiz-btn {
+  display: block;
+  width: 100%;
+  max-width: 400px;
+  margin: 2rem auto;
+  padding: 1.2rem;
+  background: linear-gradient(135deg, #007bff, #0056b3);
+  color: white;
+  border: none;
+  border-radius: 50px;
+  font-size: 1.2rem;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 10px 20px rgba(0, 123, 255, 0.3);
+  transition: transform 0.2s;
+}
+.submit-quiz-btn:hover { transform: translateY(-3px); }
+
+/* 編輯器優化 */
+.editor-card {
+  background: #fff;
+  border-radius: 20px;
+  padding: 2rem;
+  margin-bottom: 2rem;
+  border: 2px solid #007bff;
+}
+.dark-mode .editor-card { background: #1e1e1e; }
+
+.q-textarea {
+  width: 100%;
+  height: 80px;
+  padding: 0.8rem;
+  border-radius: 10px;
+  border: 1px solid #ddd;
+  margin-top: 0.5rem;
+}
+
+.opt-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.5rem;
+}
+
+/* --- Interactive Tools Enhancements --- */
 .tools-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -781,9 +1019,11 @@ onUnmounted(() => {
   background: rgba(128, 128, 128, 0.05);
   padding: 1.5rem;
   border-radius: 12px;
-  border: 1px solid #ddd;
+  border: 1px solid rgba(0,0,0,0.05);
+  background: #fff;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.05);
 }
-.dark-mode .tool-card { border-color: #444; }
+.dark-mode .tool-card { background: #1e1e1e; border-color: #333; }
 
 .name-textarea {
   width: 100%;
