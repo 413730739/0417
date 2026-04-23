@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue';
 
 // --- State Management ---
 const isDarkMode = ref(false);
+const activeTab = ref('exam'); // 'exam', 'quiz', or 'tools'
 const showZhuyin = ref(false);
 const isCountdownMode = ref(false);
 
@@ -19,6 +20,68 @@ const examList = ref([]);
 const currentTime = ref(new Date());
 const remainingSeconds = ref(120 * 60);
 let timerInterval = null;
+
+// --- Interactive Tools State ---
+// 1. Random Draw
+const namesInput = ref('');
+const namesList = ref([]);
+const drawnResult = ref(null);
+const isDrawing = ref(false);
+const excludeWinner = ref(false);
+
+// 2. Scoreboard
+const groups = ref([
+  { name: '第一組', score: 0 },
+  { name: '第二組', score: 0 }
+]);
+const sortedGroups = computed(() => {
+  return [...groups.value].sort((a, b) => b.score - a.score);
+});
+
+// 3. Presentation Timer
+const presentationSeconds = ref(0);
+const isPresentationRunning = ref(false);
+const isTimerFlashing = ref(false);
+let presentationInterval = null;
+const presentationPresets = [3, 5, 10]; // minutes
+
+// 4. Digital Quiz System
+const isQuizSubmitted = ref(false);
+const quizScore = ref(0);
+const quizQuestions = ref([]);
+const showQuizEditor = ref(false);
+
+const quizForm = ref({
+  type: 'single',
+  question: '',
+  options: ['', ''],
+  answer: null, // index for single, array for multiple, boolean for T/F
+  explanation: ''
+});
+
+// Methods for Quiz Creator
+const addOption = () => quizForm.value.options.push('');
+const removeOption = (idx) => quizForm.value.options.splice(idx, 1);
+
+const addQuestionToQuiz = () => {
+  if (!quizForm.value.question.trim()) return alert('請輸入題目');
+  
+  const newQ = {
+    ...quizForm.value,
+    id: Date.now(),
+    options: [...quizForm.value.options],
+    userAnswer: quizForm.value.type === 'multiple' ? [] : null
+  };
+  
+  quizQuestions.value.push(newQ);
+  // Reset form
+  quizForm.value = { type: 'single', question: '', options: ['', ''], answer: null, explanation: '' };
+  showQuizEditor.value = false;
+};
+
+const removeQuestion = (idx) => {
+  quizQuestions.value.splice(idx, 1);
+};
 
 // --- Methods ---
 const updateTime = () => {
@@ -104,6 +167,101 @@ const removeExam = (index) => {
   examList.value.splice(index, 1);
 };
 
+// Interactive Tool Methods
+const startDraw = () => {
+  if (isDrawing.value) return;
+  
+  const list = namesInput.value.split(/[\n,， ]+/).filter(n => n.trim() !== '');
+  if (list.length === 0) return alert('請先輸入名單');
+  
+  isDrawing.value = true;
+  let iterations = 0;
+  const maxIterations = 20;
+  
+  const interval = setInterval(() => {
+    drawnResult.value = list[Math.floor(Math.random() * list.length)];
+    iterations++;
+    if (iterations >= maxIterations) {
+      clearInterval(interval);
+      isDrawing.value = false;
+      if (excludeWinner.value) {
+        namesInput.value = list.filter(n => n !== drawnResult.value).join('\n');
+      }
+    }
+  }, 100);
+};
+
+const addGroup = () => {
+  groups.value.push({ name: `第 ${groups.value.length + 1} 組`, score: 0 });
+};
+
+const resetScores = () => {
+  if (confirm('確定要將所有分數歸零嗎？')) {
+    groups.value.forEach(g => g.score = 0);
+  }
+};
+
+const updateScore = (index, val) => {
+  groups.value[index].score += val;
+};
+
+const setPresentationTime = (mins) => {
+  presentationSeconds.value = mins * 60;
+  isTimerFlashing.value = false;
+  if (isPresentationRunning.value) {
+    clearInterval(presentationInterval);
+    isPresentationRunning.value = false;
+  }
+};
+
+const togglePresentationTimer = () => {
+  if (isPresentationRunning.value) {
+    clearInterval(presentationInterval);
+  } else {
+    presentationInterval = setInterval(() => {
+      if (presentationSeconds.value > 0) {
+        presentationSeconds.value--;
+      } else {
+        clearInterval(presentationInterval);
+        isPresentationRunning.value = false;
+        isTimerFlashing.value = true;
+      }
+    }, 1000);
+  }
+  isPresentationRunning.value = !isPresentationRunning.value;
+};
+
+// Quiz Methods
+const submitQuiz = () => {
+  let correctCount = 0;
+  quizQuestions.value.forEach(q => {
+    if (q.type === 'multiple') {
+      const isCorrect = Array.isArray(q.userAnswer) && 
+                        q.userAnswer.length === q.answer.length &&
+                        q.userAnswer.every(val => q.answer.includes(val));
+      if (isCorrect) correctCount++;
+    } else {
+      if (q.userAnswer === q.answer) correctCount++;
+    }
+  });
+  quizScore.value = Math.round((correctCount / quizQuestions.value.length) * 100);
+  isQuizSubmitted.value = true;
+};
+
+const resetQuiz = () => {
+  quizQuestions.value.forEach(q => {
+    q.userAnswer = q.type === 'multiple' ? [] : null;
+  });
+  isQuizSubmitted.value = false;
+  quizScore.value = 0;
+};
+
+const formatPresentationTime = (seconds) => {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
+
 // --- Lifecycle ---
 onMounted(() => {
   timerInterval = setInterval(updateTime, 1000);
@@ -111,6 +269,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   clearInterval(timerInterval);
+  clearInterval(presentationInterval);
 });
 </script>
 
@@ -125,14 +284,26 @@ onUnmounted(() => {
           <span v-else>淡江教科系</span>
         </a>
       </div>
-      <h1 class="title">
-        <ruby v-if="showZhuyin">考試系統<rt>ㄎㄠˇ ㄕˋ ㄒㄧˋ ㄊㄨㄥˇ</rt></ruby>
-        <span v-else>考試系統</span>
-      </h1>
+      <div class="header-center">
+        <nav class="tab-nav">
+          <button @click="activeTab = 'exam'" :class="{ active: activeTab === 'exam' }">
+            <ruby v-if="showZhuyin">考試系統<rt>ㄎㄠˇ ㄕˋ ㄒㄧˋ ㄊㄨㄥˇ</rt></ruby>
+            <span v-else>考試系統</span>
+          </button>
+          <button @click="activeTab = 'quiz'" :class="{ active: activeTab === 'quiz' }">
+            <ruby v-if="showZhuyin">測驗卷<rt>ㄘㄜˋ ㄧㄢˋ ㄐㄩㄢˋ</rt></ruby>
+            <span v-else>測驗卷</span>
+          </button>
+          <button @click="activeTab = 'tools'" :class="{ active: activeTab === 'tools' }">
+            <ruby v-if="showZhuyin">互動工具<rt>ㄏㄨˋ ㄉㄨㄥˋ ㄍㄨㄥ ㄐㄩˋ</rt></ruby>
+            <span v-else>互動工具</span>
+          </button>
+        </nav>
+      </div>
       <div class="header-right"></div> <!-- Spacer for centering -->
     </header>
 
-    <main class="container">
+    <main class="container" v-if="activeTab === 'exam'">
       <!-- Tool Buttons -->
       <div class="button-group">
         <button @click="toggleCountdown" class="tool-btn">
@@ -238,6 +409,184 @@ onUnmounted(() => {
         </div>
       </div>
     </main>
+
+    <main class="container" v-else-if="activeTab === 'quiz'">
+      <div class="quiz-header">
+        <h2>
+          <ruby v-if="showZhuyin">數位互動測驗卷<rt>ㄕㄨˋ ㄨㄟˋ ㄏㄨˋ ㄉㄨㄥˋ ㄘㄜˋ ㄧㄢˋ ㄐㄩㄢˋ</rt></ruby>
+          <span v-else>數位互動測驗卷</span>
+        </h2>
+        <div class="quiz-actions-top">
+          <button @click="showQuizEditor = !showQuizEditor" class="tool-btn">
+            {{ showQuizEditor ? '關閉編輯器' : '新增題目' }}
+          </button>
+          <div v-if="isQuizSubmitted" class="score-badge">總分：{{ quizScore }}</div>
+        </div>
+      </div>
+
+      <!-- Question Editor -->
+      <div v-if="showQuizEditor" class="editor-card">
+        <h3>題庫編輯器</h3>
+        <div class="form-group">
+          <label>題型：</label>
+          <select v-model="quizForm.type" class="type-select">
+            <option value="single">單選題</option>
+            <option value="multiple">多選題</option>
+            <option value="boolean">是非題</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>題目：</label>
+          <textarea v-model="quizForm.question" placeholder="請輸入問題內容..." class="q-textarea"></textarea>
+        </div>
+        
+        <!-- Options for Choice Questions -->
+        <div v-if="quizForm.type !== 'boolean'" class="options-edit">
+          <label>選項 (請勾選正確答案)：</label>
+          <div v-for="(opt, idx) in quizForm.options" :key="idx" class="opt-row">
+            <input v-if="quizForm.type === 'single'" type="radio" :value="idx" v-model="quizForm.answer">
+            <input v-else type="checkbox" :value="idx" v-model="quizForm.answer">
+            <input v-model="quizForm.options[idx]" placeholder="選項內容" class="opt-input">
+            <button @click="removeOption(idx)" class="delete-btn-sm">✕</button>
+          </div>
+          <button @click="addOption" class="add-opt-btn">+ 新增選項</button>
+        </div>
+
+        <!-- Options for Boolean -->
+        <div v-else class="options-edit">
+          <label>正確答案：</label>
+          <div class="bool-row">
+            <label><input type="radio" :value="true" v-model="quizForm.answer"> 正確 (O)</label>
+            <label><input type="radio" :value="false" v-model="quizForm.answer"> 錯誤 (X)</label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>解析：</label>
+          <input v-model="quizForm.explanation" placeholder="輸入答案解析..." class="explanation-input">
+        </div>
+        <button @click="addQuestionToQuiz" class="add-btn">儲存題目</button>
+      </div>
+
+      <!-- Quiz Display -->
+      <div class="quiz-list">
+        <div v-if="quizQuestions.length === 0" class="empty-state">目前尚無題目，請點擊上方按鈕新增。</div>
+        <div v-for="(q, index) in quizQuestions" :key="q.id" class="quiz-card" :class="{ 'correct': isQuizSubmitted && (q.type === 'multiple' ? (q.userAnswer.length === q.answer.length && q.userAnswer.every(val => q.answer.includes(val))) : q.userAnswer === q.answer), 'incorrect': isQuizSubmitted && !(q.type === 'multiple' ? (q.userAnswer.length === q.answer.length && q.userAnswer.every(val => q.answer.includes(val))) : q.userAnswer === q.answer) }">
+          <div class="q-header">
+            <span class="q-num">Q{{ index + 1 }}.</span>
+            <span class="q-type-label">[{{ q.type === 'single' ? '單選' : q.type === 'multiple' ? '多選' : '是非' }}]</span>
+            <button v-if="!isQuizSubmitted" @click="removeQuestion(index)" class="delete-link">刪除</button>
+          </div>
+          <p class="q-text">{{ q.question }}</p>
+          
+          <div class="q-options">
+            <template v-if="q.type === 'single'">
+              <label v-for="(opt, oIdx) in q.options" :key="oIdx" class="opt-label">
+                <input type="radio" :name="'q'+q.id" :value="oIdx" v-model="q.userAnswer" :disabled="isQuizSubmitted"> {{ opt }}
+              </label>
+            </template>
+            <template v-if="q.type === 'multiple'">
+              <label v-for="(opt, oIdx) in q.options" :key="oIdx" class="opt-label">
+                <input type="checkbox" :value="oIdx" v-model="q.userAnswer" :disabled="isQuizSubmitted"> {{ opt }}
+              </label>
+            </template>
+            <template v-if="q.type === 'boolean'">
+              <label class="opt-label"><input type="radio" :value="true" v-model="q.userAnswer" :disabled="isQuizSubmitted"> 正確 (O)</label>
+              <label class="opt-label"><input type="radio" :value="false" v-model="q.userAnswer" :disabled="isQuizSubmitted"> 錯誤 (X)</label>
+            </template>
+          </div>
+
+          <div v-if="isQuizSubmitted" class="q-feedback">
+            <div class="ans-row"><strong>正確答案：</strong> {{ q.type === 'boolean' ? (q.answer ? '正確 (O)' : '錯誤 (X)') : (Array.isArray(q.answer) ? q.answer.map(i => q.options[i]).join(', ') : q.options[q.answer]) }}</div>
+            <div class="exp-row"><strong>解析：</strong> {{ q.explanation || '無提供解析。' }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="quizQuestions.length > 0" class="quiz-footer">
+        <button v-if="!isQuizSubmitted" @click="submitQuiz" class="submit-quiz-btn">提交測驗卷</button>
+        <button v-else @click="resetQuiz" class="tool-btn">重新作答</button>
+      </div>
+    </main>
+
+    <main class="container" v-else-if="activeTab === 'tools'">
+      <div class="tools-grid">
+        <!-- Random Draw Machine -->
+        <section class="tool-card">
+          <h3><ruby v-if="showZhuyin">隨機抽籤機<rt>ㄙㄨㄟˊ ㄐㄧ ㄔㄡ ㄑㄧㄢ ㄐㄧ</rt></ruby><span v-else>隨機抽籤機</span></h3>
+          <textarea v-model="namesInput" placeholder="請輸入名單（姓名或組別，以換行分隔）" class="name-textarea"></textarea>
+          <div class="draw-controls">
+            <label><input type="checkbox" v-model="excludeWinner"> 抽中後排除</label>
+            <button @click="startDraw" :disabled="isDrawing" class="action-btn">開始抽籤</button>
+          </div>
+          <div v-if="drawnResult" class="draw-result" :class="{ 'is-drawing': isDrawing }">
+            {{ drawnResult }}
+          </div>
+        </section>
+
+        <!-- Scoreboard -->
+        <section class="tool-card">
+          <h3><ruby v-if="showZhuyin">小組競賽記分板<rt>ㄒㄧㄠˇ ㄗㄨˇ ㄐㄧㄥˋ ㄙㄞˋ ㄐㄧˋ ㄈㄣ ㄅㄢˇ</rt></ruby><span v-else>小組競賽記分板</span></h3>
+          <div class="score-controls">
+            <button @click="addGroup" class="tool-btn-sm">+ 新增小組</button>
+            <button @click="resetScores" class="tool-btn-sm reset-btn">重設分數</button>
+          </div>
+          <div class="score-list">
+            <div v-for="(group, idx) in groups" :key="idx" class="score-item">
+              <input v-model="group.name" class="group-name-input" />
+              <div class="score-actions">
+                <button @click="updateScore(idx, -1)">-1</button>
+                <span class="score-val">{{ group.score }}</span>
+                <button @click="updateScore(idx, 1)">+1</button>
+                <button @click="updateScore(idx, 5)">+5</button>
+              </div>
+            </div>
+          </div>
+          <div class="ranking-preview">
+            <strong>目前領先：</strong> {{ sortedGroups[0]?.name }} ({{ sortedGroups[0]?.score }})
+          </div>
+        </section>
+
+        <!-- Presentation Timer -->
+        <section class="tool-card">
+          <h3><ruby v-if="showZhuyin">小組報告計時器<rt>ㄒㄧㄠˇ ㄗㄨˇ ㄅㄠˋ ㄍㄠˋ ㄐㄧˋ ㄕˊ ㄑㄧˋ</rt></ruby><span v-else>小組報告計時器</span></h3>
+          <div class="preset-btns">
+            <button v-for="t in presentationPresets" :key="t" @click="setPresentationTime(t)" class="tool-btn-sm">
+              {{ t }} 分
+            </button>
+          </div>
+          <div class="presentation-timer-display" :class="{ 'flash': isTimerFlashing }">
+            {{ formatPresentationTime(presentationSeconds) }}
+          </div>
+          <button @click="togglePresentationTimer" class="action-btn">
+            {{ isPresentationRunning ? '停止' : '開始' }}
+          </button>
+        </section>
+      </div>
+
+      <!-- Real-time Ranking Table -->
+      <div class="list-section">
+        <div class="list-card">
+          <h3><ruby v-if="showZhuyin">即時排行榜<rt>ㄐㄧˊ ㄕˊ ㄆㄞˊ ㄏㄤˊ ㄅㄤˇ</rt></ruby><span v-else>即時排行榜</span></h3>
+          <table class="exam-table">
+            <thead>
+              <tr>
+                <th><ruby v-if="showZhuyin">排名<rt>ㄆㄞˊ ㄇㄧㄥˊ</rt></ruby><span v-else>排名</span></th>
+                <th><ruby v-if="showZhuyin">組別名稱<rt>ㄗㄨˇ ㄅㄧㄝˊ ㄇㄧㄥˊ ㄔㄥ</rt></ruby><span v-else>組別名稱</span></th>
+                <th><ruby v-if="showZhuyin">總分<rt>ㄗㄨˇ ㄈㄣ</rt></ruby><span v-else>總分</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(group, index) in sortedGroups" :key="index">
+                <td>{{ index + 1 }}</td>
+                <td>{{ group.name }}</td>
+                <td>{{ group.score }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
   </div>
 </template>
 
@@ -263,6 +612,28 @@ onUnmounted(() => {
   padding: 1rem 2rem;
   border-bottom: 1px solid #ccc;
 }
+
+.tab-nav {
+  display: flex;
+  gap: 1rem;
+}
+
+.tab-nav button {
+  padding: 0.5rem 1.5rem;
+  border: none;
+  background: none;
+  font-size: 1.2rem;
+  font-weight: bold;
+  cursor: pointer;
+  color: #666;
+  border-bottom: 3px solid transparent;
+}
+
+.tab-nav button.active {
+  color: #007bff;
+  border-bottom-color: #007bff;
+}
+
 .header-left, .header-right { flex: 1; }
 .title { flex: 2; text-align: center; font-size: 1.5rem; margin: 0; }
 
@@ -397,4 +768,95 @@ onUnmounted(() => {
   .time-value { font-size: 2.5rem; }
   .header { flex-direction: column; gap: 1rem; }
 }
+
+/* Interactive Tools Enhancements */
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.tool-card {
+  background: rgba(128, 128, 128, 0.05);
+  padding: 1.5rem;
+  border-radius: 12px;
+  border: 1px solid #ddd;
+}
+.dark-mode .tool-card { border-color: #444; }
+
+.name-textarea {
+  width: 100%;
+  height: 120px;
+  margin: 1rem 0;
+  padding: 0.5rem;
+  border-radius: 4px;
+  resize: none;
+}
+
+.draw-result {
+  font-size: 2.5rem;
+  text-align: center;
+  margin-top: 1rem;
+  min-height: 4rem;
+  color: #007bff;
+  font-weight: bold;
+}
+
+.is-drawing {
+  opacity: 0.6;
+  transform: scale(1.1);
+  transition: transform 0.1s;
+}
+
+.score-list {
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 1rem 0;
+}
+
+.score-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  gap: 1rem;
+}
+
+.group-name-input {
+  flex: 1;
+  padding: 0.3rem;
+  border: none;
+  background: transparent;
+  border-bottom: 1px solid #ccc;
+  color: inherit;
+}
+
+.score-actions button {
+  padding: 0.2rem 0.5rem;
+  margin: 0 2px;
+  cursor: pointer;
+}
+
+.presentation-timer-display {
+  font-size: 3.5rem;
+  text-align: center;
+  font-family: monospace;
+  margin: 1rem 0;
+  padding: 1rem;
+  border-radius: 8px;
+}
+
+@keyframes flash-animation {
+  0% { background-color: transparent; }
+  50% { background-color: rgba(220, 53, 69, 0.4); }
+  100% { background-color: transparent; }
+}
+
+.flash {
+  animation: flash-animation 0.8s infinite;
+  color: #dc3545;
+}
+
+.tool-btn-sm.reset-btn { margin-left: 0.5rem; border-color: #dc3545; color: #dc3545; }
 </style>
