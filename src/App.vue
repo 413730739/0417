@@ -58,6 +58,10 @@ const isPublishing = ref(false);
 const studentScores = ref([]); // 儲存從學生端傳回的成績
 const studentSiteUrl = 'https://413730739.github.io/0417-2/';
 
+// --- 資料庫配置 (建議使用 Firebase) ---
+// 請替換為你自己的 Firebase Realtime Database URL
+const DATABASE_URL = 'https://YOUR-PROJECT-ID.firebaseio.com'; 
+
 const quizQuestions = ref([]);
 const showQuizEditor = ref(false);
 
@@ -306,26 +310,41 @@ const publishQuizToStudent = async () => {
   isPublishing.value = true;
   playSound('click');
   
-  // 這裡應替換為您的 API 或 Firebase 寫入邏輯
-  console.log('正在發佈題目到學生端...', quizQuestions.value);
-  
-  // 模擬連線延遲
-  setTimeout(() => {
-    isPublishing.value = false;
+  try {
+    // 將題目上傳至資料庫的 quiz 路徑
+    const response = await fetch(`${DATABASE_URL}/quiz.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(quizQuestions.value)
+    });
+
+    if (!response.ok) throw new Error('發佈失敗');
+    
     alert('測驗已成功同步至學生端！');
-  }, 1500);
+  } catch (error) {
+    console.error('發佈出錯:', error);
+    alert('發佈失敗，請檢查資料庫連線設定');
+  } finally {
+    isPublishing.value = false;
+  }
 };
 
 const fetchStudentResults = async () => {
-  // 這裡應替換為從資料庫讀取成績的邏輯
-  // 範例資料結構：
-  /*
-  const mockResults = [
-    { name: '王小明', score: 80, timestamp: '10:45:12' },
-    { name: '李小華', score: 100, timestamp: '10:46:05' }
-  ];
-  studentScores.value = mockResults;
-  */
+  try {
+    // 從資料庫的 results 路徑抓取所有學生的回傳資料
+    const response = await fetch(`${DATABASE_URL}/results.json`);
+    const data = await response.json();
+    
+    if (data) {
+      // 將 Firebase 的物件格式轉換為陣列以利顯示
+      studentScores.value = Object.keys(data).map(key => ({
+        id: key,
+        ...data[key]
+      })).sort((a, b) => b.timestamp.localeCompare(a.timestamp)); // 按時間排序
+    }
+  } catch (error) {
+    console.error('獲取學生成績失敗:', error);
+  }
 };
 
 let syncInterval = null;
