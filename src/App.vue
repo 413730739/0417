@@ -61,8 +61,7 @@ const studentScores = ref([]); // 儲存從學生端傳回的成績
 const studentSiteUrl = 'https://413730739.github.io/0417-2/';
 
 // --- 資料庫配置 (建議使用 Firebase) ---
-// 請替換為你自己的 Firebase Realtime Database URL
-const DATABASE_URL = 'https://YOUR-PROJECT-ID.firebaseio.com'; 
+const DATABASE_URL = 'https://script.google.com/macros/s/AKfycbyR7t58ExcpPfuuEY6wPz4ctdJg_V9fQ0klVnopEHYnYvn-DF-OzL8YxJTtKCI1h5nvCQ/exec';
 
 const quizQuestions = ref([]);
 const showQuizEditor = ref(false);
@@ -329,24 +328,21 @@ const publishQuizToStudent = async () => {
   playSound('click');
   
   try {
-    // 移除網址結尾可能存在的斜線，避免出現 //quiz.json
-    const cleanUrl = DATABASE_URL.replace(/\/$/, '');
-    
-    // 將題目上傳至資料庫的 quiz 路徑
-    const response = await fetch(`${cleanUrl}/quiz.json`, {
-      method: 'PUT',
+    // 由於 Google Script 的限制，POST 請求通常無法讀取 body 除非處理 CORS
+    // 使用 no-cors 時無法判斷是否成功，但在這裡可以達成寫入
+    await fetch(DATABASE_URL, {
+      method: 'POST',
+      mode: 'no-cors',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(quizQuestions.value)
+      body: JSON.stringify({
+        action: 'publishQuiz',
+        questions: quizQuestions.value
+      })
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errorText || '請檢查資料庫規則是否開放'}`);
-    }
-    
     alert('測驗已成功同步至學生端！');
   } catch (error) {
-    console.error('發佈出錯:', error.message);
+    console.error('發佈出錯:', error);
     alert(`發佈失敗：${error.message}\n請確認 DATABASE_URL 是否正確，且網路連線正常。`);
   } finally {
     isPublishing.value = false;
@@ -355,16 +351,14 @@ const publishQuizToStudent = async () => {
 
 const fetchStudentResults = async () => {
   try {
-    // 從資料庫的 results 路徑抓取所有學生的回傳資料
-    const response = await fetch(`${DATABASE_URL}/results.json`);
+    // 加上 timestamp 防止瀏覽器快取舊資料
+    const response = await fetch(`${DATABASE_URL}?action=getResults&_t=${Date.now()}`);
     const data = await response.json();
     
-    if (data) {
-      // 將 Firebase 的物件格式轉換為陣列以利顯示
-      studentScores.value = Object.keys(data).map(key => ({
-        id: key,
-        ...data[key]
-      })).sort((a, b) => b.timestamp.localeCompare(a.timestamp)); // 按時間排序
+    if (Array.isArray(data)) {
+      studentScores.value = data.sort((a, b) => {
+        return new Date(b.timestamp) - new Date(a.timestamp);
+      });
     }
   } catch (error) {
     console.error('獲取學生成績失敗:', error);
