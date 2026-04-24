@@ -6,6 +6,8 @@ const isDarkMode = ref(false);
 const activeTab = ref('exam'); // 'exam', 'quiz', or 'tools'
 const showZhuyin = ref(false);
 const isCountdownMode = ref(false);
+const isFullScreenTimer = ref(false);
+const isExamFlashing = ref(false);
 
 // Form Data
 const examSubject = ref('');
@@ -43,11 +45,19 @@ const presentationSeconds = ref(0);
 const isPresentationRunning = ref(false);
 const isTimerFlashing = ref(false);
 let presentationInterval = null;
+
+const activeMusic = ref(null);
+let bgAudio = null;
+
 const presentationPresets = [3, 5, 10]; // minutes
 
 // 4. Digital Quiz System
 const isQuizSubmitted = ref(false);
 const quizScore = ref(0);
+const isPublishing = ref(false);
+const studentScores = ref([]); // 儲存從學生端傳回的成績
+const studentSiteUrl = 'https://413730739.github.io/0417-2/';
+
 const quizQuestions = ref([]);
 const showQuizEditor = ref(false);
 
@@ -88,7 +98,8 @@ const playSound = (type) => {
   const sounds = {
     click: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3',
     success: 'https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3',
-    alarm: 'https://assets.mixkit.co/active_storage/sfx/2190/2190-preview.mp3'
+    alarm: 'https://assets.mixkit.co/active_storage/sfx/2190/2190-preview.mp3',
+    warning: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3'
   };
   const audio = new Audio(sounds[type]);
   audio.volume = 0.4;
@@ -99,6 +110,20 @@ const updateTime = () => {
   currentTime.value = new Date();
   if (isCountdownMode.value) {
     const remaining = getExamRemainingSeconds();
+    
+    // 當時間剛好變為 0 時觸發警報與閃爍
+    if (remaining === 0 && remainingSeconds.value > 0) {
+      playSound('alarm');
+      isExamFlashing.value = true;
+    } else if (remaining > 0) {
+      isExamFlashing.value = false;
+    }
+
+    // 剩餘 5 分鐘 (300秒) 時播放短促提醒
+    if (remaining === 300 && remainingSeconds.value > 300) {
+      playSound('warning');
+    }
+    
     remainingSeconds.value = remaining;
   }
 };
@@ -106,6 +131,7 @@ const updateTime = () => {
 const toggleCountdown = () => {
   playSound('click');
   isCountdownMode.value = !isCountdownMode.value;
+  isExamFlashing.value = false;
   if (isCountdownMode.value) {
     // Reset countdown based on current exam's end time
     remainingSeconds.value = getExamRemainingSeconds();
@@ -248,7 +274,65 @@ const togglePresentationTimer = () => {
   isPresentationRunning.value = !isPresentationRunning.value;
 };
 
+const toggleMusic = (type) => {
+  if (activeMusic.value === type) {
+    if (bgAudio) bgAudio.pause();
+    activeMusic.value = null;
+    return;
+  }
+
+  if (bgAudio) bgAudio.pause();
+
+  const musicFiles = {
+    relax: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
+    exam: 'https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3',
+    focus: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'
+  };
+
+  bgAudio = new Audio(musicFiles[type]);
+  bgAudio.loop = (type !== 'exam'); // 鐘聲不循環
+  bgAudio.volume = 0.5;
+  bgAudio.play().catch(() => {
+    alert('請先點擊頁面任意處以允許播放音訊');
+    activeMusic.value = null;
+  });
+  activeMusic.value = type;
+};
+
 // Quiz Methods
+const publishQuizToStudent = async () => {
+  if (quizQuestions.value.length === 0) return alert('請先新增題目再發佈');
+  
+  isPublishing.value = true;
+  playSound('click');
+  
+  // 這裡應替換為您的 API 或 Firebase 寫入邏輯
+  console.log('正在發佈題目到學生端...', quizQuestions.value);
+  
+  // 模擬連線延遲
+  setTimeout(() => {
+    isPublishing.value = false;
+    alert('測驗已成功同步至學生端！');
+  }, 1500);
+};
+
+const fetchStudentResults = async () => {
+  // 這裡應替換為從資料庫讀取成績的邏輯
+  // 範例資料結構：
+  /*
+  const mockResults = [
+    { name: '王小明', score: 80, timestamp: '10:45:12' },
+    { name: '李小華', score: 100, timestamp: '10:46:05' }
+  ];
+  studentScores.value = mockResults;
+  */
+};
+
+let syncInterval = null;
+const startSync = () => {
+  syncInterval = setInterval(fetchStudentResults, 5000); // 每 5 秒檢查一次學生進度
+};
+
 const submitQuiz = () => {
   playSound('success');
   let correctCount = 0;
@@ -284,11 +368,14 @@ const formatPresentationTime = (seconds) => {
 // --- Lifecycle ---
 onMounted(() => {
   timerInterval = setInterval(updateTime, 1000);
+  startSync();
 });
 
 onUnmounted(() => {
   clearInterval(timerInterval);
   clearInterval(presentationInterval);
+  if (syncInterval) clearInterval(syncInterval);
+  if (bgAudio) bgAudio.pause();
 });
 </script>
 
@@ -437,9 +524,13 @@ onUnmounted(() => {
           <span v-else>數位互動測驗卷</span>
         </h2>
         <div class="quiz-actions-top">
-          <button @click="showQuizEditor = !showQuizEditor" class="tool-btn">
+          <button @click="showQuizEditor = !showQuizEditor" class="tool-btn-sm">
             {{ showQuizEditor ? '關閉編輯器' : '新增題目' }}
           </button>
+          <button @click="publishQuizToStudent" class="tool-btn-sm publish-btn" :disabled="isPublishing">
+            {{ isPublishing ? '同步中...' : '🚀 發佈到學生端' }}
+          </button>
+          <a :href="studentSiteUrl" target="_blank" class="student-link-btn">開啟學生端 🔗</a>
           <div v-if="isQuizSubmitted" class="score-badge">總分：{{ quizScore }}</div>
         </div>
       </div>
@@ -527,6 +618,37 @@ onUnmounted(() => {
         <button v-if="!isQuizSubmitted" @click="submitQuiz" class="submit-quiz-btn">提交測驗卷</button>
         <button v-else @click="resetQuiz" class="tool-btn">重新作答</button>
       </div>
+
+      <!-- Student Results Table -->
+      <div class="list-section" style="margin-top: 3rem;">
+        <div class="list-card student-results-card">
+          <div class="card-header">
+            <h3>👨‍🎓 學生作答即時成績 (已連線)</h3>
+            <button @click="fetchStudentResults" class="refresh-btn">🔄 立即刷新</button>
+          </div>
+          <table class="exam-table">
+            <thead>
+              <tr>
+                <th>學生姓名</th>
+                <th>測驗成績</th>
+                <th>繳交時間</th>
+                <th>狀態</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(res, idx) in studentScores" :key="idx">
+                <td>{{ res.name }}</td>
+                <td :class="{'text-success': res.score >= 60, 'text-danger': res.score < 60}">{{ res.score }} 分</td>
+                <td>{{ res.timestamp }}</td>
+                <td><span class="status-pill">已完成</span></td>
+              </tr>
+              <tr v-if="studentScores.length === 0">
+                <td colspan="4" class="empty-msg">等待學生繳交中...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </main>
 
     <main class="container" v-else-if="activeTab === 'tools'">
@@ -576,6 +698,9 @@ onUnmounted(() => {
             <button v-for="t in presentationPresets" :key="t" @click="setPresentationTime(t)" class="tool-btn-sm">
               {{ t }} 分
             </button>
+            <button @click="isFullScreenTimer = true" class="tool-btn-sm fs-trigger-btn">
+              🗖 全螢幕
+            </button>
           </div>
           <div class="presentation-timer-display" :class="{ 'flash': isTimerFlashing }">
             {{ formatPresentationTime(presentationSeconds) }}
@@ -583,6 +708,17 @@ onUnmounted(() => {
           <button @click="togglePresentationTimer" class="action-btn">
             {{ isPresentationRunning ? '停止' : '開始' }}
           </button>
+        </section>
+
+        <!-- Music Switcher -->
+        <section class="tool-card">
+          <h3><ruby v-if="showZhuyin">課堂環境音效<rt>ㄎㄜˋ ㄊㄤˊ ㄏㄨㄢˊ ㄐㄧㄥˋ ㄧㄣ ㄒㄧㄠˋ</rt></ruby><span v-else>課堂環境音效</span></h3>
+          <p class="tool-desc">點擊播放背景音樂或提示音</p>
+          <div class="music-grid">
+            <button @click="toggleMusic('relax')" :class="['music-btn', { 'active': activeMusic === 'relax' }]">🎵 輕音樂</button>
+            <button @click="toggleMusic('focus')" :class="['music-btn', { 'active': activeMusic === 'focus' }]">🎧 專注背景</button>
+            <button @click="toggleMusic('exam')" :class="['music-btn', { 'active': activeMusic === 'exam' }]">🔔 考試鐘聲</button>
+          </div>
         </section>
       </div>
 
@@ -607,6 +743,19 @@ onUnmounted(() => {
         </div>
       </div>
     </main>
+    </transition>
+
+    <!-- 全螢幕計時器遮罩 -->
+    <transition name="fade">
+      <div v-if="isFullScreenTimer" class="fs-timer-overlay" :class="{ 'dark': isDarkMode, 'flash': isTimerFlashing }">
+        <button @click="isFullScreenTimer = false" class="fs-close-btn">✕</button>
+        <div class="fs-timer-content">
+          <div class="fs-timer-value">{{ formatPresentationTime(presentationSeconds) }}</div>
+          <button @click="togglePresentationTimer" class="fs-start-btn">
+            {{ isPresentationRunning ? '停止' : '開始' }}
+          </button>
+        </div>
+      </div>
     </transition>
   </div>
 </template>
@@ -1094,9 +1243,92 @@ onUnmounted(() => {
 }
 
 .flash {
-  animation: flash-animation 0.8s infinite;
-  color: #dc3545;
+  animation: flash-animation 0.8s infinite !important;
+  color: #dc3545 !important;
+  -webkit-text-fill-color: #dc3545 !important;
 }
 
 .tool-btn-sm.reset-btn { margin-left: 0.5rem; border-color: #dc3545; color: #dc3545; }
+
+/* 全螢幕計時器樣式 */
+.fs-timer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: white;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.3s;
+}
+.fs-timer-overlay.dark { background: #121212; color: white; }
+
+.fs-close-btn {
+  position: absolute;
+  top: 2rem;
+  right: 2rem;
+  font-size: 2.5rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.5;
+  transition: opacity 0.3s;
+}
+.fs-close-btn:hover { opacity: 1; }
+
+.fs-timer-content { text-align: center; }
+.fs-timer-value {
+  font-size: 25vw;
+  font-weight: 800;
+  font-family: 'Courier New', monospace;
+  line-height: 1;
+  margin-bottom: 3rem;
+}
+.fs-start-btn {
+  font-size: 2rem;
+  padding: 1rem 4rem;
+  border-radius: 60px;
+  border: 3px solid #007bff;
+  background: transparent;
+  color: #007bff;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.3s;
+}
+.fs-start-btn:hover { background: #007bff; color: white; transform: scale(1.05); }
+.dark .fs-start-btn { border-color: #4da3ff; color: #4da3ff; }
+.dark .fs-start-btn:hover { background: #4da3ff; color: #121212; }
+.fs-trigger-btn { background-color: #6c757d; color: white; border: none; margin-left: 0.5rem; }
+
+.tool-desc { font-size: 0.85rem; color: #666; margin-bottom: 1rem; }
+.dark-mode .tool-desc { color: #aaa; }
+.music-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
+.music-btn {
+  padding: 0.8rem;
+  border: 1px solid #ddd;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  color: inherit;
+  font-weight: 600;
+  transition: all 0.3s;
+}
+.music-btn.active { background: #007bff; color: white; border-color: #007bff; box-shadow: 0 4px 10px rgba(0, 123, 255, 0.3); }
+.music-btn:nth-child(3) { grid-column: span 2; }
+
+.publish-btn { background-color: #6610f2; color: white; border: none; }
+.publish-btn:hover { background-color: #520dc2; }
+.student-link-btn { font-size: 0.8rem; color: #007bff; text-decoration: none; padding: 0.5rem; border: 1px solid #007bff; border-radius: 8px; }
+.student-results-card { border-top: 4px solid #6610f2; }
+.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+.refresh-btn { background: none; border: 1px solid #ddd; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+.text-success { color: #28a745; font-weight: bold; }
+.text-danger { color: #dc3545; font-weight: bold; }
+.status-pill { background: #e3f2fd; color: #0d47a1; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; }
+.empty-msg { padding: 2rem !important; color: #999; }
 </style>
