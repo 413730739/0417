@@ -8,6 +8,7 @@ const showZhuyin = ref(false);
 const isCountdownMode = ref(false);
 const isFullScreenTimer = ref(false);
 const isExamFlashing = ref(false);
+const isExamWarning = ref(false);
 
 // Form Data
 const examSubject = ref('');
@@ -44,6 +45,7 @@ const sortedGroups = computed(() => {
 const presentationSeconds = ref(0);
 const isPresentationRunning = ref(false);
 const isTimerFlashing = ref(false);
+const isTimerWarning = ref(false);
 let presentationInterval = null;
 
 const activeMusic = ref(null);
@@ -123,6 +125,9 @@ const updateTime = () => {
       isExamFlashing.value = false;
     }
 
+    // 預熱提醒：剩餘 3 分鐘 (180秒) 變橘色
+    isExamWarning.value = remaining <= 180 && remaining > 0;
+
     // 剩餘 5 分鐘 (300秒) 時播放短促提醒
     if (remaining === 300 && remainingSeconds.value > 300) {
       playSound('warning');
@@ -136,9 +141,14 @@ const toggleCountdown = () => {
   playSound('click');
   isCountdownMode.value = !isCountdownMode.value;
   isExamFlashing.value = false;
+  isExamWarning.value = false;
   if (isCountdownMode.value) {
     // Reset countdown based on current exam's end time
     remainingSeconds.value = getExamRemainingSeconds();
+    // 如果一切換過去就已經是 0 秒，則啟動閃爍
+    if (remainingSeconds.value === 0) {
+      isExamFlashing.value = true;
+    }
   }
 };
 
@@ -253,6 +263,7 @@ const updateScore = (index, val) => {
 const setPresentationTime = (mins) => {
   presentationSeconds.value = mins * 60;
   isTimerFlashing.value = false;
+  isTimerWarning.value = false;
   if (isPresentationRunning.value) {
     clearInterval(presentationInterval);
     isPresentationRunning.value = false;
@@ -267,11 +278,18 @@ const togglePresentationTimer = () => {
     presentationInterval = setInterval(() => {
       if (presentationSeconds.value > 0) {
         presentationSeconds.value--;
+        // 剩餘 5 分鐘提醒 (300秒)
+        if (presentationSeconds.value === 300) {
+          playSound('warning');
+        }
+        // 預熱提醒：剩餘 3 分鐘 (180秒) 變橘色
+        isTimerWarning.value = presentationSeconds.value <= 180 && presentationSeconds.value > 0;
       } else {
         clearInterval(presentationInterval);
         playSound('alarm');
         isPresentationRunning.value = false;
         isTimerFlashing.value = true;
+        isTimerWarning.value = false;
       }
     }, 1000);
   }
@@ -452,7 +470,7 @@ onUnmounted(() => {
           <ruby v-if="showZhuyin">{{ isCountdownMode ? '剩餘時間' : '現在時間' }}<rt>{{ isCountdownMode ? 'ㄕㄥˋ ㄩˊ ㄕˊ ㄐㄧㄢ' : 'ㄒㄧㄢˋ ㄗㄞˋ ㄕˊ ㄐㄧㄢ' }}</rt></ruby>
           <span v-else>{{ isCountdownMode ? '剩餘時間' : '現在時間' }}</span>
         </h2>
-        <div class="time-value">
+        <div class="time-value" :class="{ 'flash': isCountdownMode && isExamFlashing, 'warning-orange': isCountdownMode && isExamWarning }">
           {{ isCountdownMode ? formatCountdown(remainingSeconds) : formatTime(currentTime) }}
         </div>
       </div>
@@ -721,7 +739,7 @@ onUnmounted(() => {
               🗖 全螢幕
             </button>
           </div>
-          <div class="presentation-timer-display" :class="{ 'flash': isTimerFlashing }">
+          <div class="presentation-timer-display" :class="{ 'flash': isTimerFlashing, 'warning-orange': isTimerWarning }">
             {{ formatPresentationTime(presentationSeconds) }}
           </div>
           <button @click="togglePresentationTimer" class="action-btn">
@@ -769,7 +787,7 @@ onUnmounted(() => {
       <div v-if="isFullScreenTimer" class="fs-timer-overlay" :class="{ 'dark': isDarkMode, 'flash': isTimerFlashing }">
         <button @click="isFullScreenTimer = false" class="fs-close-btn">✕</button>
         <div class="fs-timer-content">
-          <div class="fs-timer-value">{{ formatPresentationTime(presentationSeconds) }}</div>
+          <div class="fs-timer-value" :class="{ 'flash': isTimerFlashing, 'warning-orange': isTimerWarning }">{{ formatPresentationTime(presentationSeconds) }}</div>
           <button @click="togglePresentationTimer" class="fs-start-btn">
             {{ isPresentationRunning ? '停止' : '開始' }}
           </button>
@@ -1265,6 +1283,11 @@ onUnmounted(() => {
   animation: flash-animation 0.8s infinite !important;
   color: #dc3545 !important;
   -webkit-text-fill-color: #dc3545 !important;
+}
+
+.warning-orange {
+  color: #fd7e14 !important;
+  -webkit-text-fill-color: #fd7e14 !important;
 }
 
 .tool-btn-sm.reset-btn { margin-left: 0.5rem; border-color: #dc3545; color: #dc3545; }
