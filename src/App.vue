@@ -329,14 +329,20 @@ const publishQuizToStudent = async () => {
   playSound('click');
   
   try {
+    // 移除網址結尾可能存在的斜線，避免出現 //quiz.json
+    const cleanUrl = DATABASE_URL.replace(/\/$/, '');
+    
     // 將題目上傳至資料庫的 quiz 路徑
-    const response = await fetch(`${DATABASE_URL}/quiz.json`, {
+    const response = await fetch(`${cleanUrl}/quiz.json`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(quizQuestions.value)
     });
 
-    if (!response.ok) throw new Error(`HTTP 錯誤: ${response.status} - 請檢查資料庫規則是否開放`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText || '請檢查資料庫規則是否開放'}`);
+    }
     
     alert('測驗已成功同步至學生端！');
   } catch (error) {
