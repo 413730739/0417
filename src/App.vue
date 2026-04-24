@@ -336,12 +336,12 @@ const publishQuizToStudent = async () => {
       body: JSON.stringify(quizQuestions.value)
     });
 
-    if (!response.ok) throw new Error('發佈失敗');
+    if (!response.ok) throw new Error(`HTTP 錯誤: ${response.status} - 請檢查資料庫規則是否開放`);
     
     alert('測驗已成功同步至學生端！');
   } catch (error) {
-    console.error('發佈出錯:', error);
-    alert('發佈失敗，請檢查資料庫連線設定');
+    console.error('發佈出錯:', error.message);
+    alert(`發佈失敗：${error.message}\n請確認 DATABASE_URL 是否正確，且網路連線正常。`);
   } finally {
     isPublishing.value = false;
   }
