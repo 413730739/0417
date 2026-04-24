@@ -61,7 +61,7 @@ const studentScores = ref([]); // 儲存從學生端傳回的成績
 const studentSiteUrl = 'https://413730739.github.io/0417-2/';
 
 // --- 資料庫配置 (建議使用 Firebase) ---
-const DATABASE_URL = 'https://script.google.com/macros/s/AKfycbyR7t58ExcpPfuuEY6wPz4ctdJg_V9fQ0klVnopEHYnYvn-DF-OzL8YxJTtKCI1h5nvCQ/exec';
+const DATABASE_URL = 'https://script.google.com/macros/s/AKfycbxwuZPaq_YZGm0IIerf31-qGy4PctH8CoP006_k_rxd_jA3dNoPtFYjTRFOlCECy6_C9A/exec';
 
 const quizQuestions = ref([]);
 const showQuizEditor = ref(false);
