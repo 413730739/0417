@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 
 // --- State Management ---
 const isDarkMode = ref(false);
@@ -54,17 +54,25 @@ let bgAudio = null;
 const presentationPresets = [3, 5, 10]; // minutes
 
 // 4. Digital Quiz System
-const isQuizSubmitted = ref(false);
-const quizScore = ref(0);
 const isPublishing = ref(false);
 const studentScores = ref([]); // 儲存從學生端傳回的成績
+const deletedTimestamps = ref(new Set()); // 本地刪除黑名單快取
 const studentSiteUrl = 'https://413730739.github.io/0417-2/';
 
-// --- 資料庫配置 (建議使用 Firebase) ---
-const DATABASE_URL = 'https://script.google.com/macros/s/AKfycbxwuZPaq_YZGm0IIerf31-qGy4PctH8CoP006_k_rxd_jA3dNoPtFYjTRFOlCECy6_C9A/exec';
+// --- 資料庫配置 ---
+// 此 URL 用於處理所有後端邏輯：包含發布題目、獲取學生成績以及刪除紀錄
+const DATABASE_URL = 'https://script.google.com/macros/s/AKfycbyR7t58ExcpPfuuEY6wPz4ctdJg_V9fQ0klVnopEHYnYvn-DF-OzL8YxJTtKCI1h5nvCQ/exec';
 
-const quizQuestions = ref([]);
+// 從 localStorage 讀取已儲存的題目，若無則初始化為空陣列
+const quizQuestions = ref(JSON.parse(localStorage.getItem('teacher_quiz_questions') || '[]'));
+
+// 監聽題目變動並同步到 localStorage，確保重新整理後資料不遺失
+watch(quizQuestions, (newVal) => {
+  localStorage.setItem('teacher_quiz_questions', JSON.stringify(newVal));
+}, { deep: true });
+
 const showQuizEditor = ref(false);
+const editingId = ref(null);
 
 const quizForm = ref({
   type: 'single',
@@ -78,24 +86,80 @@ const quizForm = ref({
 const addOption = () => quizForm.value.options.push('');
 const removeOption = (idx) => quizForm.value.options.splice(idx, 1);
 
+const toggleQuizEditor = () => {
+  showQuizEditor.value = !showQuizEditor.value;
+  if (!showQuizEditor.value) {
+    editingId.value = null;
+    quizForm.value = { type: 'single', question: '', options: ['', ''], answer: null, explanation: '' };
+  }
+};
+
+const editQuestion = (index) => {
+  const q = quizQuestions.value[index];
+  editingId.value = q.id;
+  quizForm.value = {
+    type: q.type,
+    question: q.question,
+    options: [...q.options],
+    answer: Array.isArray(q.answer) ? [...q.answer] : q.answer,
+    explanation: q.explanation || ''
+  };
+  showQuizEditor.value = true;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
 const addQuestionToQuiz = () => {
   if (!quizForm.value.question.trim()) return alert('請輸入題目');
   
-  const newQ = {
-    ...quizForm.value,
-    id: Date.now(),
-    options: [...quizForm.value.options],
-    userAnswer: quizForm.value.type === 'multiple' ? [] : null
-  };
+  if (editingId.value) {
+    const index = quizQuestions.value.findIndex(q => q.id === editingId.value);
+    if (index !== -1) {
+      quizQuestions.value[index] = {
+        ...quizQuestions.value[index],
+        ...quizForm.value,
+        options: [...quizForm.value.options]
+      };
+    }
+    editingId.value = null;
+  } else {
+    const newQ = {
+      ...quizForm.value,
+      id: Date.now(),
+      options: [...quizForm.value.options],
+      userAnswer: quizForm.value.type === 'multiple' ? [] : null
+    };
+    quizQuestions.value.push(newQ);
+  }
   
-  quizQuestions.value.push(newQ);
   // Reset form
   quizForm.value = { type: 'single', question: '', options: ['', ''], answer: null, explanation: '' };
   showQuizEditor.value = false;
 };
 
-const removeQuestion = (idx) => {
+const removeQuestion = async (idx) => {
+  if (!confirm('確定要刪除此題目嗎？刪除後將自動同步更新學生端的題庫。')) return;
+  
   quizQuestions.value.splice(idx, 1);
+  
+  // 題目刪除後，立即同步到後端資料庫
+  isPublishing.value = true;
+  try {
+    await fetch(DATABASE_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'publishQuiz',
+        questions: quizQuestions.value
+      })
+    });
+    playSound('success');
+  } catch (error) {
+    console.error('同步刪除失敗:', error);
+    alert('刪除成功但同步至學生端失敗，請手動點擊「發佈到學生端」按鈕。');
+  } finally {
+    isPublishing.value = false;
+  }
 };
 
 // --- Methods ---
@@ -322,12 +386,15 @@ const toggleMusic = (type) => {
 
 // Quiz Methods
 const publishQuizToStudent = async () => {
-  if (quizQuestions.value.length === 0) return alert('請先新增題目再發佈');
+  if (quizQuestions.value.length === 0) {
+    if (!confirm('目前題庫為空，確定要清空學生端的所有題目嗎？')) return;
+  }
   
   isPublishing.value = true;
   playSound('click');
   
   try {
+    console.log('準備發送的題目資料：', quizQuestions.value);
     // 由於 Google Script 的限制，POST 請求通常無法讀取 body 除非處理 CORS
     // 使用 no-cors 時無法判斷是否成功，但在這裡可以達成寫入
     await fetch(DATABASE_URL, {
@@ -351,12 +418,15 @@ const publishQuizToStudent = async () => {
 
 const fetchStudentResults = async () => {
   try {
-    // 加上 timestamp 防止瀏覽器快取舊資料
+    // 從統一的資料庫網址獲取資料
     const response = await fetch(`${DATABASE_URL}?action=getResults&_t=${Date.now()}`);
     const data = await response.json();
     
     if (Array.isArray(data)) {
-      studentScores.value = data.sort((a, b) => {
+      // 過濾掉存在於本地黑名單中的資料，防止後端還沒刪完就又被抓回來
+      const filteredData = data.filter(res => !deletedTimestamps.value.has(res.timestamp));
+      
+      studentScores.value = filteredData.sort((a, b) => {
         return new Date(b.timestamp) - new Date(a.timestamp);
       });
     }
@@ -365,35 +435,37 @@ const fetchStudentResults = async () => {
   }
 };
 
+const deleteResult = async (timestamp) => {
+  if (!confirm('確定要刪除這筆成績紀錄嗎？')) return;
+  
+  try {
+    // 1. 立即加入本地黑名單
+    deletedTimestamps.value.add(timestamp);
+
+    console.log('正在向後端請求刪除成績，時間戳記為：', timestamp);
+    // 發送刪除請求到統一的後端
+    await fetch(DATABASE_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'deleteResult',
+        timestamp: timestamp,
+        sheetName: 'Results' // 明確指定刪除 Results 工作表的資料
+      })
+    });
+
+    // 2. 立即從前端目前的顯示列表中移除（雙重保險）
+    studentScores.value = studentScores.value.filter(res => res.timestamp !== timestamp);
+  } catch (error) {
+    console.error('刪除失敗:', error);
+    alert('刪除失敗，請檢查網路連線');
+  }
+};
+
 let syncInterval = null;
 const startSync = () => {
   syncInterval = setInterval(fetchStudentResults, 5000); // 每 5 秒檢查一次學生進度
-};
-
-const submitQuiz = () => {
-  playSound('success');
-  let correctCount = 0;
-  quizQuestions.value.forEach(q => {
-    if (q.type === 'multiple') {
-      const isCorrect = Array.isArray(q.userAnswer) && 
-                        q.userAnswer.length === q.answer.length &&
-                        q.userAnswer.every(val => q.answer.includes(val));
-      if (isCorrect) correctCount++;
-    } else {
-      if (q.userAnswer === q.answer) correctCount++;
-    }
-  });
-  quizScore.value = Math.round((correctCount / quizQuestions.value.length) * 100);
-  isQuizSubmitted.value = true;
-};
-
-const resetQuiz = () => {
-  playSound('click');
-  quizQuestions.value.forEach(q => {
-    q.userAnswer = q.type === 'multiple' ? [] : null;
-  });
-  isQuizSubmitted.value = false;
-  quizScore.value = 0;
 };
 
 const formatPresentationTime = (seconds) => {
@@ -561,20 +633,19 @@ onUnmounted(() => {
           <span v-else>數位互動測驗卷</span>
         </h2>
         <div class="quiz-actions-top">
-          <button @click="showQuizEditor = !showQuizEditor" class="tool-btn-sm">
-            {{ showQuizEditor ? '關閉編輯器' : '新增題目' }}
+          <button @click="toggleQuizEditor" class="tool-btn-sm">
+            {{ showQuizEditor ? (editingId ? '取消編輯' : '關閉編輯器') : '新增題目' }}
           </button>
           <button @click="publishQuizToStudent" class="tool-btn-sm publish-btn" :disabled="isPublishing">
             {{ isPublishing ? '同步中...' : '🚀 發佈到學生端' }}
           </button>
           <a :href="studentSiteUrl" target="_blank" class="student-link-btn">開啟學生端 🔗</a>
-          <div v-if="isQuizSubmitted" class="score-badge">總分：{{ quizScore }}</div>
         </div>
       </div>
 
       <!-- Question Editor -->
       <div v-if="showQuizEditor" class="editor-card">
-        <h3>題庫編輯器</h3>
+        <h3>{{ editingId ? '編輯題目' : '題庫編輯器' }}</h3>
         <div class="form-group">
           <label>題型：</label>
           <select v-model="quizForm.type" class="type-select">
@@ -613,54 +684,47 @@ onUnmounted(() => {
           <label>解析：</label>
           <input v-model="quizForm.explanation" placeholder="輸入答案解析..." class="explanation-input">
         </div>
-        <button @click="addQuestionToQuiz" class="add-btn">儲存題目</button>
+        <button @click="addQuestionToQuiz" class="add-btn">{{ editingId ? '更新並儲存題目' : '儲存題目' }}</button>
       </div>
 
       <!-- Quiz Display -->
       <div class="quiz-list">
         <div v-if="quizQuestions.length === 0" class="empty-state">目前尚無題目，請點擊上方按鈕新增。</div>
-        <div v-for="(q, index) in quizQuestions" :key="q.id" class="quiz-card" :class="{ 'correct': isQuizSubmitted && (q.type === 'multiple' ? (q.userAnswer.length === q.answer.length && q.userAnswer.every(val => q.answer.includes(val))) : q.userAnswer === q.answer), 'incorrect': isQuizSubmitted && !(q.type === 'multiple' ? (q.userAnswer.length === q.answer.length && q.userAnswer.every(val => q.answer.includes(val))) : q.userAnswer === q.answer) }">
+        <div v-for="(q, index) in quizQuestions" :key="q.id" class="quiz-card">
           <div class="q-header">
             <span class="q-num">Q{{ index + 1 }}.</span>
             <span class="q-type-label">[{{ q.type === 'single' ? '單選' : q.type === 'multiple' ? '多選' : '是非' }}]</span>
-            <button v-if="!isQuizSubmitted" @click="removeQuestion(index)" class="delete-link">刪除</button>
+            <div class="q-actions">
+              <button @click="editQuestion(index)" class="edit-link">編輯</button>
+              <button @click="removeQuestion(index)" class="delete-link">刪除</button>
+            </div>
           </div>
           <p class="q-text">{{ q.question }}</p>
           
           <div class="q-options">
             <template v-if="q.type === 'single'">
-              <label v-for="(opt, oIdx) in q.options" :key="oIdx" class="opt-label">
-                <input type="radio" :name="'q'+q.id" :value="oIdx" v-model="q.userAnswer" :disabled="isQuizSubmitted"> {{ opt }}
+              <label v-for="(opt, oIdx) in q.options" :key="oIdx" class="opt-label is-disabled">
+                <input type="radio" disabled :checked="q.answer === oIdx"> {{ opt }}
               </label>
             </template>
             <template v-if="q.type === 'multiple'">
-              <label v-for="(opt, oIdx) in q.options" :key="oIdx" class="opt-label">
-                <input type="checkbox" :value="oIdx" v-model="q.userAnswer" :disabled="isQuizSubmitted"> {{ opt }}
+              <label v-for="(opt, oIdx) in q.options" :key="oIdx" class="opt-label is-disabled">
+                <input type="checkbox" disabled :checked="Array.isArray(q.answer) && q.answer.includes(oIdx)"> {{ opt }}
               </label>
             </template>
             <template v-if="q.type === 'boolean'">
-              <label class="opt-label"><input type="radio" :value="true" v-model="q.userAnswer" :disabled="isQuizSubmitted"> 正確 (O)</label>
-              <label class="opt-label"><input type="radio" :value="false" v-model="q.userAnswer" :disabled="isQuizSubmitted"> 錯誤 (X)</label>
+              <label class="opt-label is-disabled"><input type="radio" disabled :checked="q.answer === true"> 正確 (O)</label>
+              <label class="opt-label is-disabled"><input type="radio" disabled :checked="q.answer === false"> 錯誤 (X)</label>
             </template>
           </div>
-
-          <div v-if="isQuizSubmitted" class="q-feedback">
-            <div class="ans-row"><strong>正確答案：</strong> {{ q.type === 'boolean' ? (q.answer ? '正確 (O)' : '錯誤 (X)') : (Array.isArray(q.answer) ? q.answer.map(i => q.options[i]).join(', ') : q.options[q.answer]) }}</div>
-            <div class="exp-row"><strong>解析：</strong> {{ q.explanation || '無提供解析。' }}</div>
-          </div>
         </div>
-      </div>
-
-      <div v-if="quizQuestions.length > 0" class="quiz-footer">
-        <button v-if="!isQuizSubmitted" @click="submitQuiz" class="submit-quiz-btn">提交測驗卷</button>
-        <button v-else @click="resetQuiz" class="tool-btn">重新作答</button>
       </div>
 
       <!-- Student Results Table -->
       <div class="list-section" style="margin-top: 3rem;">
         <div class="list-card student-results-card">
           <div class="card-header">
-            <h3>👨‍🎓 學生作答即時成績 (已連線)</h3>
+            <h3>👨‍🎓 學生作答成績</h3>
             <button @click="fetchStudentResults" class="refresh-btn">🔄 立即刷新</button>
           </div>
           <table class="exam-table">
@@ -670,6 +734,7 @@ onUnmounted(() => {
                 <th>測驗成績</th>
                 <th>繳交時間</th>
                 <th>狀態</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -678,9 +743,12 @@ onUnmounted(() => {
                 <td :class="{'text-success': res.score >= 60, 'text-danger': res.score < 60}">{{ res.score }} 分</td>
                 <td>{{ res.timestamp }}</td>
                 <td><span class="status-pill">已完成</span></td>
+                <td>
+                  <button @click="deleteResult(res.timestamp)" class="delete-btn" style="padding: 0.2rem 0.6rem; font-size: 0.8rem;">刪除</button>
+                </td>
               </tr>
               <tr v-if="studentScores.length === 0">
-                <td colspan="4" class="empty-msg">等待學生繳交中...</td>
+                <td colspan="5" class="empty-msg">等待學生繳交中...</td>
               </tr>
             </tbody>
           </table>
