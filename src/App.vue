@@ -56,7 +56,7 @@ const presentationPresets = [3, 5, 10]; // minutes
 // 4. Digital Quiz System
 const isPublishing = ref(false);
 const studentScores = ref([]); // 儲存從學生端傳回的成績
-const deletedTimestamps = ref(new Set()); // 本地刪除黑名單快取
+const deletedTimestamps = ref(new Set(JSON.parse(localStorage.getItem('deleted_results_cache') || '[]')));
 const studentSiteUrl = 'https://413730739.github.io/0417-2/';
 
 // --- 資料庫配置 ---
@@ -70,6 +70,17 @@ const quizQuestions = ref(JSON.parse(localStorage.getItem('teacher_quiz_question
 watch(quizQuestions, (newVal) => {
   localStorage.setItem('teacher_quiz_questions', JSON.stringify(newVal));
 }, { deep: true });
+
+// 處理題型切換時的答案格式初始化
+const handleTypeChange = () => {
+  if (quizForm.value.type === 'multiple') {
+    quizForm.value.answer = [];
+  } else if (quizForm.value.type === 'boolean') {
+    quizForm.value.answer = null;
+  } else {
+    quizForm.value.answer = null;
+  }
+};
 
 const showQuizEditor = ref(false);
 const editingId = ref(null);
@@ -110,6 +121,32 @@ const editQuestion = (index) => {
 
 const addQuestionToQuiz = () => {
   if (!quizForm.value.question.trim()) return alert('請輸入題目');
+
+  // 答案驗證
+  if (quizForm.value.type === 'single') {
+    const validOptions = quizForm.value.options.filter(opt => opt.trim() !== '');
+    if (validOptions.length < 2) {
+      return alert('單選題至少需要輸入兩個選項。');
+    }
+    if (quizForm.value.answer === null || quizForm.value.answer === undefined) {
+      return alert('單選題請選擇一個正確答案。');
+    }
+  } else if (quizForm.value.type === 'multiple') {
+    const validOptions = quizForm.value.options.filter(opt => opt.trim() !== '');
+    if (validOptions.length < 3) {
+      return alert('多選題至少需要輸入三個選項。');
+    }
+    if (!Array.isArray(quizForm.value.answer) || quizForm.value.answer.length < 2) {
+      return alert('多選題請選擇至少兩個正確答案。');
+    }
+  } else if (quizForm.value.type === 'boolean') {
+    if (quizForm.value.answer === null || quizForm.value.answer === undefined) {
+      return alert('是非題請選擇正確或錯誤。');
+    }
+  }
+
+  // 過濾掉空選項，避免儲存不必要的資料
+  quizForm.value.options = quizForm.value.options.filter(opt => opt.trim() !== '');
   
   if (editingId.value) {
     const index = quizQuestions.value.findIndex(q => q.id === editingId.value);
@@ -144,15 +181,16 @@ const removeQuestion = async (idx) => {
   // 題目刪除後，立即同步到後端資料庫
   isPublishing.value = true;
   try {
-    await fetch(DATABASE_URL, {
+    const response = await fetch(DATABASE_URL, {
       method: 'POST',
       mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({
         action: 'publishQuiz',
         questions: quizQuestions.value
       })
     });
+
     playSound('success');
   } catch (error) {
     console.error('同步刪除失敗:', error);
@@ -395,12 +433,11 @@ const publishQuizToStudent = async () => {
   
   try {
     console.log('準備發送的題目資料：', quizQuestions.value);
-    // 由於 Google Script 的限制，POST 請求通常無法讀取 body 除非處理 CORS
-    // 使用 no-cors 時無法判斷是否成功，但在這裡可以達成寫入
-    await fetch(DATABASE_URL, {
+    
+    const response = await fetch(DATABASE_URL, {
       method: 'POST',
       mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({
         action: 'publishQuiz',
         questions: quizQuestions.value
@@ -423,7 +460,22 @@ const fetchStudentResults = async () => {
     const data = await response.json();
     
     if (Array.isArray(data)) {
-      // 過濾掉存在於本地黑名單中的資料，防止後端還沒刪完就又被抓回來
+      // 獲取伺服器端所有的時間戳記，用來檢查後端是否已經完成物理刪除
+      const serverTimestamps = new Set(data.map(res => res.timestamp));
+      
+      // 自動清理：如果本地黑名單中的資料在伺服器端已經消失了，就從黑名單移除
+      let cacheChanged = false;
+      deletedTimestamps.value.forEach(ts => {
+        if (!serverTimestamps.has(ts)) {
+          deletedTimestamps.value.delete(ts);
+          cacheChanged = true;
+        }
+      });
+      if (cacheChanged) {
+        localStorage.setItem('deleted_results_cache', JSON.stringify(Array.from(deletedTimestamps.value)));
+      }
+
+      // 過濾掉尚未被後端刪除（但在本地黑名單中）的資料，防止資料「閃回」
       const filteredData = data.filter(res => !deletedTimestamps.value.has(res.timestamp));
       
       studentScores.value = filteredData.sort((a, b) => {
@@ -438,28 +490,37 @@ const fetchStudentResults = async () => {
 const deleteResult = async (timestamp) => {
   if (!confirm('確定要刪除這筆成績紀錄嗎？')) return;
   
+  isPublishing.value = true; // 顯示同步狀態
+  playSound('click');
   try {
     // 1. 立即加入本地黑名單
     deletedTimestamps.value.add(timestamp);
+    
+    // 將黑名單同步到 localStorage，確保重新整理頁面後，還沒被後端刪掉的資料不會重新出現
+    localStorage.setItem('deleted_results_cache', JSON.stringify(Array.from(deletedTimestamps.value)));
 
-    console.log('正在向後端請求刪除成績，時間戳記為：', timestamp);
+    console.log(`[刪除請求] 嘗試刪除時間戳記: ${timestamp}`);
+
     // 發送刪除請求到統一的後端
     await fetch(DATABASE_URL, {
       method: 'POST',
       mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({
         action: 'deleteResult',
-        timestamp: timestamp,
+        timestamp: String(timestamp), // 強制轉為字串確保後端比對一致
         sheetName: 'Results' // 明確指定刪除 Results 工作表的資料
       })
     });
-
-    // 2. 立即從前端目前的顯示列表中移除（雙重保險）
+    
+    // 2. 立即從前端目前的顯示列表中移除
     studentScores.value = studentScores.value.filter(res => res.timestamp !== timestamp);
+    playSound('success');
   } catch (error) {
     console.error('刪除失敗:', error);
-    alert('刪除失敗，請檢查網路連線');
+    alert(`刪除失敗：${error.message}`);
+  } finally {
+    isPublishing.value = false;
   }
 };
 
@@ -648,7 +709,7 @@ onUnmounted(() => {
         <h3>{{ editingId ? '編輯題目' : '題庫編輯器' }}</h3>
         <div class="form-group">
           <label>題型：</label>
-          <select v-model="quizForm.type" class="type-select">
+          <select v-model="quizForm.type" @change="handleTypeChange" class="type-select">
             <option value="single">單選題</option>
             <option value="multiple">多選題</option>
             <option value="boolean">是非題</option>
