@@ -661,7 +661,7 @@ onUnmounted(() => {
       <div v-if="examList.length > 0" class="list-section">
         <div class="list-card">
           <h3><ruby v-if="showZhuyin">考科清單<rt>ㄎㄠˇ ㄎㄜ ㄑㄧㄥ ㄉㄢ</rt></ruby><span v-else>考科清單</span></h3>
-          <table class="exam-table">
+          <table class="exam-table exam-list-table">
             <thead>
               <tr>
                 <th><ruby v-if="showZhuyin">科目<rt>ㄎㄜ ㄇㄨˋ</rt></ruby><span v-else>科目</span></th>
@@ -673,17 +673,20 @@ onUnmounted(() => {
             </thead>
             <transition-group name="list" tag="tbody">
               <tr v-for="(item, index) in examList" :key="index">
-                <td>{{ item.subject }}</td>
-                <td>{{ item.startTime }}</td>
-                <td>{{ item.endTime }}</td>
-                <td>{{ item.invigilator }}</td>
-                <td>
+                <td data-label="科目">{{ item.subject }}</td>
+                <td data-label="開始時間">{{ item.startTime }}</td>
+                <td data-label="結束時間">{{ item.endTime }}</td>
+                <td data-label="監考">{{ item.invigilator }}</td>
+                <td data-label="操作">
                   <button @click="removeExam(index)" class="delete-btn">刪除</button>
                 </td>
               </tr>
             </transition-group>
           </table>
         </div>
+      </div>
+      <div v-else class="empty-msg-card list-section">
+        <p class="empty-msg">目前沒有考試項目。</p>
       </div>
     </main>
 
@@ -788,31 +791,33 @@ onUnmounted(() => {
             <h3>👨‍🎓 學生作答成績</h3>
             <button @click="fetchStudentResults" class="refresh-btn">🔄 立即刷新</button>
           </div>
-          <table class="exam-table">
-            <thead>
-              <tr>
-                <th>學生姓名</th>
-                <th>測驗成績</th>
-                <th>繳交時間</th>
-                <th>狀態</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(res, idx) in studentScores" :key="idx">
-                <td>{{ res.name }}</td>
-                <td :class="{'text-success': res.score >= 60, 'text-danger': res.score < 60}">{{ res.score }} 分</td>
-                <td>{{ res.timestamp }}</td>
-                <td><span class="status-pill">已完成</span></td>
-                <td>
-                  <button @click="deleteResult(res.timestamp)" class="delete-btn" style="padding: 0.2rem 0.6rem; font-size: 0.8rem;">刪除</button>
-                </td>
-              </tr>
-              <tr v-if="studentScores.length === 0">
-                <td colspan="5" class="empty-msg">等待學生繳交中...</td>
-              </tr>
-            </tbody>
-          </table>
+          <template v-if="studentScores.length > 0">
+            <table class="exam-table student-scores-table">
+              <thead>
+                <tr>
+                  <th>學生姓名</th>
+                  <th>測驗成績</th>
+                  <th>繳交時間</th>
+                  <th>狀態</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(res, idx) in studentScores" :key="idx">
+                  <td data-label="學生姓名">{{ res.name }}</td>
+                  <td data-label="測驗成績" :class="{'text-success': res.score >= 60, 'text-danger': res.score < 60}">{{ res.score }} 分</td>
+                  <td data-label="繳交時間">{{ res.timestamp }}</td>
+                  <td data-label="狀態"><span class="status-pill">已完成</span></td>
+                  <td data-label="操作">
+                    <button @click="deleteResult(res.timestamp)" class="delete-btn-sm">刪除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </template>
+          <div v-else class="empty-msg-card">
+            <p class="empty-msg">等待學生繳交中...</p>
+          </div>
         </div>
       </div>
     </main>
@@ -934,13 +939,19 @@ onUnmounted(() => {
 }
 
 .light-mode {
-  background-color: #f8f9fa;
-  color: #212529;
+  background-color: #ffffff;
+  color: #000000;
 }
 
 .dark-mode {
-  background-color: #121212;
-  color: #e9ecef;
+  background-color: #000000;
+  color: #ffffff;
+}
+/* 確保所有標題在暗黑模式下都是白色 */
+.dark-mode h1,
+.dark-mode h2,
+.dark-mode h3 {
+  color: #ffffff;
 }
 
 .header {
@@ -995,14 +1006,19 @@ onUnmounted(() => {
 .title { flex: 2; text-align: center; font-size: 1.5rem; margin: 0; }
 
 .nav-button {
-  background: linear-gradient(135deg, #007bff, #0056b3);
+  background: #007bff;
   color: white;
-  padding: 0.5rem 1rem;
-  border-radius: 8px;
+  padding: 0.6rem 1.2rem;
+  border-radius: 12px;
   text-decoration: none;
-  font-size: 0.95rem;
-  box-shadow: 0 4px 6px rgba(0, 123, 255, 0.2);
+  font-size: 1rem;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.2);
+  transition: all 0.3s ease;
+  display: inline-flex;
+  align-items: center;
 }
+.nav-button:hover { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(0, 123, 255, 0.3); }
 
 .container {
   max-width: 1000px;
@@ -1018,17 +1034,16 @@ onUnmounted(() => {
 }
 
 .tool-btn {
-  padding: 0.8rem;
+  padding: 0.8rem 1.2rem;
   cursor: pointer;
-  border: 1px solid rgba(0, 123, 255, 0.3);
+  border: 2px solid #007bff;
   background: white;
-  color: inherit;
+  color: #007bff;
   border-radius: 12px;
   transition: all 0.3s ease;
   font-weight: 600;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
 }
-.dark-mode .tool-btn { background: #1e1e1e; border-color: #444; }
+.dark-mode .tool-btn { background: #1e1e1e; border-color: #007bff; color: #4da3ff; }
 .tool-btn:hover { 
   background: #007bff; 
   color: white; 
@@ -1036,19 +1051,29 @@ onUnmounted(() => {
   box-shadow: 0 4px 12px rgba(0, 123, 255, 0.2);
 }
 
+.tool-btn-sm {
+  padding: 0.5rem 1rem;
+  border-radius: 10px;
+  border: 1px solid #dee2e6;
+  background: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.dark-mode .tool-btn-sm { background: #2c2c2c; border-color: #444; color: #eee; }
+.tool-btn-sm:hover { border-color: #007bff; color: #007bff; background: rgba(0,123,255,0.05); }
+
 .time-display {
   text-align: center;
   margin: 2rem 0;
   padding: 2rem;
-  background: linear-gradient(135deg, #ffffff, #f0f7ff);
+  background: transparent;
   border-radius: 24px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.05);
-  border: 1px solid rgba(0, 123, 255, 0.1);
+  border: 2px solid #dee2e6;
 }
-.dark-mode .time-display {
-  background: linear-gradient(135deg, #1e1e1e, #141e2a);
-  border-color: #333;
-}
+.dark-mode .time-display { border-color: #333; }
+
 .time-value { 
   font-size: 5rem; 
   font-weight: 800; 
@@ -1057,6 +1082,12 @@ onUnmounted(() => {
   line-height: 1; /* Ensure text fits within its box */
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+}
+.dark-mode .time-value {
+  background: none; /* 移除漸層背景 */
+  -webkit-background-clip: unset; /* 重置背景裁剪 */
+  -webkit-text-fill-color: #ffffff; /* 設定文字顏色為白色 */
+  color: #ffffff; /* Fallback for non-webkit browsers */
 }
 
 .info-section {
@@ -1067,11 +1098,12 @@ onUnmounted(() => {
 .input-card, .display-card { 
   padding: 2rem; 
   background: white;
-  border-radius: 16px; 
-  box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+  border-radius: 20px; 
+  box-shadow: 0 10px 25px rgba(0,0,0,0.05);
   border: 1px solid #eee;
+  color: inherit;
 }
-.dark-mode .input-card, .dark-mode .display-card { background: #1e1e1e; border-color: #333; }
+.dark-mode .input-card, .dark-mode .display-card { background: #000000; border-color: #333; color: #ffffff; } /* 確保文字顏色為白色 */
 .form-group { margin-bottom: 1rem; }
 
 .form-group label { 
@@ -1082,24 +1114,40 @@ onUnmounted(() => {
 
 .form-group input { 
   width: 100%; 
-  padding: 0.8rem; 
-  border: 1px solid #ccc; 
-  border-radius: 4px; 
-  background-color: #fcfcfc;
-  color: #333;
+  box-sizing: border-box;
+  padding: 0.8rem 1rem; 
+  border: 2px solid #dee2e6; 
+  border-radius: 12px; 
+  background-color: #fff;
+  color: inherit;
   font-size: 1rem;
+  transition: all 0.3s ease;
+  max-width: 100%; /* 確保輸入框不會溢出 */
+  outline: none;
 }
+.form-group input[type="number"]::-webkit-outer-spin-button,
+.form-group input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.form-group input[type="number"] {
+  -moz-appearance: textfield; /* Firefox */
+}
+.form-group input:focus { border-color: #007bff; box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1); }
+.dark-mode .form-group input { background-color: #111; border-color: #333; color: #fff; }
 
 .time-input-group {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
+  gap: 0.8rem;
 }
 
 .time-input {
-  width: 60px !important;
+  width: 100px !important;
   padding: 0.8rem !important;
   text-align: center;
+  border-radius: 12px !important;
 }
 
 .time-separator {
@@ -1110,16 +1158,17 @@ onUnmounted(() => {
 .add-btn {
   width: 100%;
   padding: 1rem;
-  background: linear-gradient(135deg, #28a745, #218838);
+  background: #28a745;
   color: white;
   border: none;
-  border-radius: 10px;
+  border-radius: 12px;
   cursor: pointer;
-  font-weight: bold;
+  font-weight: 600;
   margin-top: 1rem;
-  box-shadow: 0 4px 10px rgba(40, 167, 69, 0.2);
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.2);
+  transition: all 0.3s ease;
 }
-.add-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 15px rgba(40, 167, 69, 0.3); }
+.add-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(40, 167, 69, 0.3); }
 .add-btn:active { transform: scale(0.98); }
 
 .list-section { margin-top: 2rem; }
@@ -1127,15 +1176,15 @@ onUnmounted(() => {
   width: 100%;
   border-collapse: collapse;
   margin-top: 1rem;
+  color: inherit;
 }
 .exam-table thead th {
-  background: #f8f9fa;
-  color: #666;
+  background: rgba(128, 128, 128, 0.1);
+  color: inherit;
   text-transform: uppercase;
   font-size: 0.85rem;
   letter-spacing: 0.5px;
 }
-.dark-mode .exam-table thead th { background: #2c2c2c; color: #aaa; }
 .exam-table th, .exam-table td {
   padding: 1rem;
   text-align: center;
@@ -1146,37 +1195,70 @@ onUnmounted(() => {
 .exam-table tr:hover { background: rgba(0, 123, 255, 0.02); }
 
 .delete-btn {
+  /* 確保 delete-btn-sm 的樣式不會被 delete-btn 覆蓋 */
+  /* 這裡的樣式是針對大尺寸按鈕的，小尺寸按鈕使用 delete-btn-sm */
+  /* 移除 style 屬性中的 padding, font-size, border-radius，改用 class */
+  /* padding: 0.3rem 0.7rem; font-size: 0.8rem; border-radius: 8px; */
   background-color: #dc3545;
   color: white;
   border: none;
-  padding: 0.4rem 0.8rem;
-  border-radius: 4px;
+  padding: 0.6rem 1.2rem;
+  border-radius: 12px; /* Unified border-radius */
   cursor: pointer;
-  transition: background 0.2s;
+  font-weight: 600;
+  transition: all 0.3s ease;
 }
-.delete-btn:hover { background-color: #c82333; }
+.delete-btn:hover { background-color: #c82333; transform: translateY(-1px); }
+
+/* 統一所有編輯器輸入框與選單樣式 */
+.type-select, .q-textarea, .opt-input, .explanation-input, .name-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.8rem 1rem;
+  border: 2px solid #dee2e6;
+  border-radius: 12px;
+  background-color: #fff;
+  color: inherit;
+  font-size: 1rem;
+  transition: all 0.3s ease;
+  max-width: 100%; /* 確保輸入框不會溢出 */
+  outline: none;
+}
+.type-select:focus, .q-textarea:focus, .opt-input:focus, .explanation-input:focus, .name-textarea:focus {
+  border-color: #007bff;
+  box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+}
+.dark-mode .type-select, .dark-mode .q-textarea, .dark-mode .opt-input, .dark-mode .explanation-input, .dark-mode .name-textarea {
+  background-color: #111;
+  border-color: #333;
+}
 
 .list-card { 
-  background: #fff;
-  border: 1px solid #eee; 
-  border-radius: 12px; 
+  background: transparent;
+  border: 2px solid #eee; 
+  border-radius: 20px; 
   padding: 1.5rem; 
-  box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+  box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+  color: inherit;
 }
-.dark-mode .list-card { border-color: #444; }
+.dark-mode .list-card { border-color: #333; background: #000000; color: #ffffff; } /* 確保文字顏色為白色 */
 
 /* Transitions */
-.fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
+.delete-btn-sm {
+  background-color: #dc3545;
+  color: white;
+  border: none;
+  padding: 0.3rem 0.7rem; /* Adjusted padding for smaller size */
+  border-radius: 8px; /* Unified border-radius for small buttons */
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
 .list-enter-active, .list-leave-active { transition: all 0.5s ease; }
 .list-enter-from, .list-leave-to { opacity: 0; transform: translateX(30px); }
 .list-move { transition: transform 0.5s ease; }
-
-@media (max-width: 600px) {
-  .time-value { font-size: 2.5rem; }
-  .time-display { padding: 2rem 1rem; } /* Adjust padding for smaller screens */
-}
 
 /* --- Quiz System Mobile Redesign --- */
 .quiz-header {
@@ -1202,17 +1284,18 @@ onUnmounted(() => {
 }
 
 .quiz-card {
-  background: white;
+  background: transparent;
   border-radius: 20px;
   padding: 1.5rem;
   margin-bottom: 1.5rem;
-  box-shadow: 0 8px 20px rgba(0,0,0,0.06);
-  border: 1px solid #eee;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+  border: 2px solid #eee;
   transition: transform 0.3s ease;
   position: relative;
   overflow: hidden;
+  color: inherit;
 }
-.dark-mode .quiz-card { background: #1e1e1e; border-color: #333; }
+.dark-mode .quiz-card { background: #000000; border-color: #333; color: #ffffff; } /* 確保文字顏色為白色 */
 
 .q-header {
   display: flex;
@@ -1222,8 +1305,7 @@ onUnmounted(() => {
 }
 
 .q-num { font-weight: 800; color: #007bff; font-size: 1.2rem; }
-.q-type-label { background: #e9ecef; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; color: #666; }
-.dark-mode .q-type-label { background: #333; color: #aaa; }
+.q-type-label { background: rgba(128,128,128,0.1); padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; color: inherit; }
 
 .q-text {
   font-size: 1.15rem;
@@ -1279,41 +1361,30 @@ onUnmounted(() => {
 }
 
 .submit-quiz-btn {
-  display: block;
-  width: 100%;
-  max-width: 400px;
-  margin: 2rem auto;
-  padding: 1.2rem;
-  background: linear-gradient(135deg, #007bff, #0056b3);
+  background: #007bff;
   color: white;
+  padding: 1rem 2rem;
+  border-radius: 12px;
+  font-weight: 600;
   border: none;
-  border-radius: 50px;
-  font-size: 1.2rem;
-  font-weight: bold;
+  box-shadow: 0 4px 15px rgba(0,123,255,0.3);
+  transition: all 0.3s ease;
   cursor: pointer;
-  box-shadow: 0 10px 20px rgba(0, 123, 255, 0.3);
-  transition: transform 0.2s;
 }
-.submit-quiz-btn:hover { transform: translateY(-3px); }
+.submit-quiz-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,123,255,0.4); }
 
 /* 編輯器優化 */
 .editor-card {
-  background: #fff;
+  background: transparent;
   border-radius: 20px;
   padding: 2rem;
   margin-bottom: 2rem;
   border: 2px solid #007bff;
+  color: inherit;
 }
-.dark-mode .editor-card { background: #1e1e1e; }
+.dark-mode .editor-card { background: #000000; color: #ffffff; } /* 確保文字顏色為白色 */
 
-.q-textarea {
-  width: 100%;
-  height: 80px;
-  padding: 0.8rem;
-  border-radius: 10px;
-  border: 1px solid #ddd;
-  margin-top: 0.5rem;
-}
+.q-textarea { height: 100px; margin-top: 0.5rem; resize: vertical; }
 
 .opt-row {
   display: flex;
@@ -1331,23 +1402,16 @@ onUnmounted(() => {
 }
 
 .tool-card {
-  background: rgba(128, 128, 128, 0.05);
+  background: transparent;
   padding: 1.5rem;
-  border-radius: 12px;
-  border: 1px solid rgba(0,0,0,0.05);
-  background: #fff;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+  border-radius: 20px;
+  border: 2px solid #eee;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+  color: inherit;
 }
-.dark-mode .tool-card { background: #1e1e1e; border-color: #333; }
+.dark-mode .tool-card { background: #000000; border-color: #333; color: #ffffff; } /* 確保文字顏色為白色 */
 
-.name-textarea {
-  width: 100%;
-  height: 120px;
-  margin: 1rem 0;
-  padding: 0.5rem;
-  border-radius: 4px;
-  resize: none;
-}
+.name-textarea { height: 120px; margin: 1rem 0; resize: vertical; }
 
 .draw-result {
   font-size: 2.5rem;
@@ -1380,18 +1444,44 @@ onUnmounted(() => {
 
 .group-name-input {
   flex: 1;
+  box-sizing: border-box;
   padding: 0.3rem;
-  border: none;
-  background: transparent;
-  border-bottom: 1px solid #ccc;
+  border: 2px solid #dee2e6;
+  border-radius: 8px;
+  background: #fff;
   color: inherit;
+  transition: all 0.3s ease;
+  max-width: 100%; /* 確保輸入框不會溢出 */
 }
+.dark-mode .group-name-input { background: #111; border-color: #333; }
+
+.action-btn {
+  padding: 0.8rem 1.5rem;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 10px rgba(0,123,255,0.2);
+}
+.action-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(0,123,255,0.3); }
+.action-btn:disabled { background: #ccc; transform: none; box-shadow: none; cursor: not-allowed; }
 
 .score-actions button {
-  padding: 0.2rem 0.5rem;
-  margin: 0 2px;
+  padding: 0.4rem 0.8rem;
+  margin: 0 4px;
+  border-radius: 8px;
+  border: none;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s;
 }
+.btn-add { background: #28a745; color: white; }
+.btn-add-lg { background: #28a745; color: white; padding: 0.4rem 1.2rem !important; }
+.btn-sub { background: #dc3545; color: white; }
+.score-actions button:hover { opacity: 0.9; transform: scale(1.05); }
 
 .presentation-timer-display {
   font-size: 3.5rem;
@@ -1422,6 +1512,58 @@ onUnmounted(() => {
 .tool-btn-sm.reset-btn { margin-left: 0.5rem; border-color: #dc3545; color: #dc3545; }
 
 /* 全螢幕計時器樣式 */
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .header {
+    padding: 0.75rem 1rem;
+  }
+  .tab-nav button {
+    padding: 0.5rem 0.8rem;
+    font-size: 0.95rem;
+  }
+  .container {
+    padding: 1.5rem;
+  }
+  .button-group, .info-section, .tools-grid {
+    grid-template-columns: 1fr; /* Stack elements on smaller screens */
+  }
+  .time-value { font-size: 4rem; }
+  .quiz-actions-top {
+    flex-direction: column;
+    gap: 0.8rem;
+  }
+  .quiz-actions-top .tool-btn-sm,
+  .quiz-actions-top .student-link-btn {
+    width: 100%; /* 確保按鈕和連結在堆疊時佔滿寬度 */
+    text-align: center; /* 文字置中 */
+    box-sizing: border-box; /* 確保 padding/border 包含在寬度內 */
+  }
+}
+
+@media (max-width: 600px) {
+  .header {
+    padding: 0.5rem 0.8rem;
+  }
+  .tab-nav button {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.85rem;
+  }
+  .nav-button { font-size: 0.9rem; padding: 0.5rem 1rem; }
+  .container {
+    padding: 1rem;
+  }
+  h2 { font-size: 1.5rem; }
+  h3 { font-size: 1.2rem; }
+  .time-value { font-size: 3rem; }
+  .time-display { padding: 2rem 1rem; }
+  .q-text { font-size: 1rem; }
+  .draw-result { font-size: 2rem; }
+  .time-input {
+    width: 80px !important; /* Adjust width for very small screens */
+    box-sizing: border-box; /* 確保 box-sizing 應用於此 */
+  }
+}
+
 .fs-timer-overlay {
   position: fixed;
   top: 0;
@@ -1461,9 +1603,9 @@ onUnmounted(() => {
   margin-bottom: 3rem;
 }
 .fs-start-btn {
-  font-size: 2rem;
+  font-size: 1.5rem;
   padding: 1rem 4rem;
-  border-radius: 60px;
+  border-radius: 15px;
   border: 3px solid #007bff;
   background: transparent;
   color: #007bff;
@@ -1476,15 +1618,15 @@ onUnmounted(() => {
 .dark .fs-start-btn:hover { background: #4da3ff; color: #121212; }
 .fs-trigger-btn { background-color: #6c757d; color: white; border: none; margin-left: 0.5rem; }
 
-.tool-desc { font-size: 0.85rem; color: #666; margin-bottom: 1rem; }
-.dark-mode .tool-desc { color: #aaa; }
+.tool-desc { font-size: 0.85rem; color: inherit; opacity: 0.7; margin-bottom: 1rem; }
 .music-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
 .music-btn {
   padding: 0.8rem;
-  border: 1px solid #ddd;
+  border: 2px solid #dee2e6; /* Consistent border style */
   background: transparent;
-  border-radius: 8px;
+  border-radius: 12px; /* Consistent border-radius */
   cursor: pointer;
+  max-width: 100%; /* 確保按鈕不會溢出 */
   color: inherit;
   font-weight: 600;
   transition: all 0.3s;
