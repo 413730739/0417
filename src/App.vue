@@ -1,6 +1,11 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 
+// --- Directives ---
+const vFocusAuto = {
+  mounted: (el) => el.focus()
+};
+
 // --- State Management ---
 const isDarkMode = ref(false);
 const activeTab = ref('exam'); // 'exam', 'quiz', or 'tools'
@@ -26,16 +31,19 @@ let timerInterval = null;
 
 // --- Interactive Tools State ---
 // 1. Random Draw
-const namesInput = ref('');
+const drawNamesInput = ref('');
+const groupNamesInput = ref('');
 const namesList = ref([]);
 const drawnResult = ref(null);
 const isDrawing = ref(false);
 const excludeWinner = ref(false);
+const groupSize = ref(3);
+const randomGroups = ref([]);
 
 // 2. Scoreboard
 const groups = ref([
-  { name: '第一組', score: 0 },
-  { name: '第二組', score: 0 }
+  { name: '第一組', score: 0, isEditing: false, scoreAnimation: false },
+  { name: '第二組', score: 0, isEditing: false, scoreAnimation: false }
 ]);
 const sortedGroups = computed(() => {
   return [...groups.value].sort((a, b) => b.score - a.score);
@@ -321,11 +329,37 @@ const removeExam = (index) => {
   examList.value.splice(index, 1);
 };
 
+// 煙火特效函式：使用 canvas-confetti 實現慶祝效果
+const triggerFireworks = async () => {
+  try {
+    // 透過 ESM 動態載入，無需預先安裝套件
+    const { default: confetti } = await import('https://esm.run/canvas-confetti');
+    
+    const duration = 3 * 1000;
+    const animationEnd = Date.now() + duration;
+    const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 9999 };
+
+    const randomInRange = (min, max) => Math.random() * (max - min) + min;
+
+    const interval = setInterval(function() {
+      const timeLeft = animationEnd - Date.now();
+      if (timeLeft <= 0) return clearInterval(interval);
+
+      const particleCount = 50 * (timeLeft / duration);
+      // 從左右兩側隨機噴發
+      confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
+      confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
+    }, 250);
+  } catch (err) {
+    console.error('無法載入特效庫:', err);
+  }
+};
+
 // Interactive Tool Methods
 const startDraw = () => {
   if (isDrawing.value) return;
   
-  const list = namesInput.value.split(/[\n,， ]+/).filter(n => n.trim() !== '');
+  const list = drawNamesInput.value.split(/[\n,， ]+/).filter(n => n.trim() !== '');
   if (list.length === 0) return alert('請先輸入名單');
   
   isDrawing.value = true;
@@ -338,16 +372,43 @@ const startDraw = () => {
     if (iterations >= maxIterations) {
       clearInterval(interval);
       isDrawing.value = false;
+      triggerFireworks(); // 抽籤結束時觸發煙火
       if (excludeWinner.value) {
           playSound('success');
-        namesInput.value = list.filter(n => n !== drawnResult.value).join('\n');
+        drawNamesInput.value = list.filter(n => n !== drawnResult.value).join('\n');
       }
     }
   }, 100);
 };
 
+const clearDrawNames = () => {
+  if (drawNamesInput.value && !confirm('確定要清空抽籤名單嗎？')) return;
+  drawNamesInput.value = '';
+  drawnResult.value = null;
+};
+
+const clearGroupNames = () => {
+  if (groupNamesInput.value && !confirm('確定要清空分組名單嗎？')) return;
+  groupNamesInput.value = '';
+  randomGroups.value = [];
+};
+
+const startGrouping = () => {
+  const list = groupNamesInput.value.split(/[\n,， ]+/).filter(n => n.trim() !== '');
+  if (list.length === 0) return alert('請先輸入名單');
+  if (groupSize.value <= 0) return alert('每組人數必須大於 0');
+  
+  const shuffled = [...list].sort(() => Math.random() - 0.5);
+  const result = [];
+  for (let i = 0; i < shuffled.length; i += groupSize.value) {
+    result.push(shuffled.slice(i, i + groupSize.value));
+  }
+  randomGroups.value = result;
+  playSound('success');
+};
+
 const addGroup = () => {
-  groups.value.push({ name: `第 ${groups.value.length + 1} 組`, score: 0 });
+  groups.value.push({ name: `第 ${groups.value.length + 1} 組`, score: 0, isEditing: false });
 };
 
 const resetScores = () => {
@@ -359,6 +420,10 @@ const resetScores = () => {
 const updateScore = (index, val) => {
   playSound('click');
   groups.value[index].score += val;
+  if (val > 0) {
+    groups.value[index].scoreAnimation = true;
+    setTimeout(() => groups.value[index].scoreAnimation = false, 300); // 動畫持續時間
+  }
 };
 
 const setPresentationTime = (mins) => {
@@ -827,13 +892,33 @@ onUnmounted(() => {
         <!-- Random Draw Machine -->
         <section class="tool-card">
           <h3><ruby v-if="showZhuyin">隨機抽籤機<rt>ㄙㄨㄟˊ ㄐㄧ ㄔㄡ ㄑㄧㄢ ㄐㄧ</rt></ruby><span v-else>隨機抽籤機</span></h3>
-          <textarea v-model="namesInput" placeholder="請輸入名單（姓名或組別，以換行分隔）" class="name-textarea"></textarea>
+          <textarea v-model="drawNamesInput" placeholder="請輸入抽籤名單（換行分隔）" class="name-textarea"></textarea>
           <div class="draw-controls">
             <label><input type="checkbox" v-model="excludeWinner"> 抽中後排除</label>
+            <button @click="clearDrawNames" class="tool-btn-sm reset-btn">清空名單</button>
             <button @click="startDraw" :disabled="isDrawing" class="action-btn">開始抽籤</button>
           </div>
           <div v-if="drawnResult" class="draw-result" :class="{ 'is-drawing': isDrawing }">
             {{ drawnResult }}
+          </div>
+        </section>
+
+        <!-- Grouping Machine -->
+        <section class="tool-card">
+          <h3><ruby v-if="showZhuyin">隨機分組機<rt>ㄙㄨㄟˊ ㄐㄧ ㄈㄣ ㄗㄨˇ ㄐㄧ</rt></ruby><span v-else>隨機分組機</span></h3>
+          <textarea v-model="groupNamesInput" placeholder="請輸入分組名單（換行分隔）" class="name-textarea"></textarea>
+          <div class="group-controls">
+            <div class="form-group inline">
+              <label>每組人數：</label>
+              <input v-model.number="groupSize" type="number" min="1" class="group-size-input" />
+            </div>
+            <button @click="clearGroupNames" class="tool-btn-sm reset-btn">清空名單</button>
+            <button @click="startGrouping" class="action-btn">開始分組</button>
+          </div>
+          <div v-if="randomGroups.length > 0" class="group-results">
+            <div v-for="(group, gIdx) in randomGroups" :key="gIdx" class="group-item">
+              <strong>第 {{ gIdx + 1 }} 組：</strong> {{ group.join('、') }}
+            </div>
           </div>
         </section>
 
@@ -847,8 +932,22 @@ onUnmounted(() => {
           <transition-group name="list" tag="div" class="score-list">
             <div v-for="(group, idx) in groups" :key="idx" class="score-item">
               <div class="score-main">
-                <input v-model="group.name" class="group-name-input" />
-                <span class="score-val">{{ group.score }}</span>
+                <input 
+                  v-if="group.isEditing" 
+                  v-model="group.name" 
+                  class="group-name-input" 
+                  @blur="group.isEditing = false"
+                  @keyup.enter="group.isEditing = false"
+                  v-focus-auto
+                />
+                <span 
+                  v-else 
+                  class="group-name-display" 
+                  @click="group.isEditing = true"
+                >
+                  {{ group.name }}
+                </span>
+                <span class="score-val" :class="{ 'score-jump': group.scoreAnimation }">{{ group.score }}</span>
               </div>
               <div class="score-actions">
                 <button @click="updateScore(idx, -1)" class="btn-sub">-1</button>
@@ -974,7 +1073,7 @@ onUnmounted(() => {
 
 .tab-nav {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.8rem;
 }
 
 .tab-nav button {
@@ -982,7 +1081,7 @@ onUnmounted(() => {
   border: none;
   background: none;
   font-size: 1.1rem;
-  font-weight: bold;
+  font-weight: 600;
   cursor: pointer;
   color: #adb5bd;
   transition: all 0.3s ease;
@@ -1008,17 +1107,17 @@ onUnmounted(() => {
 .nav-button {
   background: #007bff;
   color: white;
-  padding: 0.6rem 1.2rem;
+  padding: 0.5rem 1rem;
   border-radius: 12px;
   text-decoration: none;
   font-size: 1rem;
   font-weight: 600;
-  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.2);
-  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(0, 123, 255, 0.2);
+  transition: all 0.2s ease; /* Keep transition for hover effects */
   display: inline-flex;
   align-items: center;
 }
-.nav-button:hover { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(0, 123, 255, 0.3); }
+.nav-button:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3); }
 
 .container {
   max-width: 1000px;
@@ -1029,39 +1128,41 @@ onUnmounted(() => {
 .button-group {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 1rem;
+  gap: 0.8rem;
   margin-bottom: 2rem;
 }
 
 .tool-btn {
-  padding: 0.8rem 1.2rem;
+  padding: 0.6rem 1rem;
   cursor: pointer;
   border: 2px solid #007bff;
   background: white;
   color: #007bff;
   border-radius: 12px;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease; /* Keep transition for hover effects */
   font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 123, 255, 0.1); /* Adjusted shadow */
 }
 .dark-mode .tool-btn { background: #1e1e1e; border-color: #007bff; color: #4da3ff; }
 .tool-btn:hover { 
   background: #007bff; 
   color: white; 
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.2);
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.2); /* Adjusted shadow */
 }
 
 .tool-btn-sm {
-  padding: 0.5rem 1rem;
+  padding: 0.3rem 0.6rem;
   border-radius: 10px;
   border: 1px solid #dee2e6;
   background: white;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease; /* Keep transition for hover effects */
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08); /* Keep shadow */
 }
 .dark-mode .tool-btn-sm { background: #2c2c2c; border-color: #444; color: #eee; }
-.tool-btn-sm:hover { border-color: #007bff; color: #007bff; background: rgba(0,123,255,0.05); }
+.tool-btn-sm:hover { border-color: #007bff; color: #007bff; transform: scale(1.05); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); } /* Keep hover effects */
 
 .time-display {
   text-align: center;
@@ -1165,10 +1266,10 @@ onUnmounted(() => {
   cursor: pointer;
   font-weight: 600;
   margin-top: 1rem;
-  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.2);
-  transition: all 0.3s ease;
+  box-shadow: 0 4px 10px rgba(40, 167, 69, 0.15);
+  transition: all 0.2s ease;
 }
-.add-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(40, 167, 69, 0.3); }
+.add-btn:hover { transform: scale(1.05); box-shadow: 0 6px 15px rgba(40, 167, 69, 0.25); }
 .add-btn:active { transform: scale(0.98); }
 
 .list-section { margin-top: 2rem; }
@@ -1202,13 +1303,14 @@ onUnmounted(() => {
   background-color: #dc3545;
   color: white;
   border: none;
-  padding: 0.6rem 1.2rem;
+  padding: 0.4rem 0.8rem;
   border-radius: 12px; /* Unified border-radius */
   cursor: pointer;
   font-weight: 600;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(220, 53, 69, 0.15);
 }
-.delete-btn:hover { background-color: #c82333; transform: translateY(-1px); }
+.delete-btn:hover { background-color: #c82333; transform: scale(1.05); box-shadow: 0 4px 12px rgba(220, 53, 69, 0.25); }
 
 /* 統一所有編輯器輸入框與選單樣式 */
 .type-select, .q-textarea, .opt-input, .explanation-input, .name-textarea {
@@ -1248,17 +1350,72 @@ onUnmounted(() => {
   background-color: #dc3545;
   color: white;
   border: none;
-  padding: 0.3rem 0.7rem; /* Adjusted padding for smaller size */
+  padding: 0.2rem 0.5rem;
   border-radius: 8px; /* Unified border-radius for small buttons */
   cursor: pointer;
   font-weight: 600;
   transition: all 0.3s ease;
+  box-shadow: 0 1px 4px rgba(220, 53, 69, 0.1);
 }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
+.delete-btn-sm:hover { transform: scale(1.05); box-shadow: 0 2px 6px rgba(220, 53, 69, 0.15); }
 
 .list-enter-active, .list-leave-active { transition: all 0.5s ease; }
 .list-enter-from, .list-leave-to { opacity: 0; transform: translateX(30px); }
 .list-move { transition: transform 0.5s ease; }
+
+/* --- Tool Sub-sections --- */
+.tool-sub-section { margin-top: 1rem; }
+.tool-divider {
+  margin: 1.5rem 0;
+  border: none;
+  border-top: 1px solid rgba(128, 128, 128, 0.1);
+}
+.draw-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+.group-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+.form-group.inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0;
+}
+.group-size-input {
+  width: 80px !important;
+  padding: 0.5rem !important;
+  text-align: center;
+}
+.group-results {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: rgba(128, 128, 128, 0.05);
+  border-radius: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  text-align: left;
+}
+.group-item {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.1);
+  font-size: 0.95rem;
+}
+.group-item:last-child { border-bottom: none; }
+.dark-mode .group-results { background: rgba(255, 255, 255, 0.05); }
+
+@media (max-width: 600px) {
+  .group-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
 
 /* --- Quiz System Mobile Redesign --- */
 .quiz-header {
@@ -1270,7 +1427,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 1rem;
+  gap: 0.8rem;
   margin-top: 1rem;
 }
 
@@ -1302,6 +1459,11 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1rem;
+}
+
+.q-actions {
+  display: flex;
+  gap: 0.8rem;
 }
 
 .q-num { font-weight: 800; color: #007bff; font-size: 1.2rem; }
@@ -1367,11 +1529,11 @@ onUnmounted(() => {
   border-radius: 12px;
   font-weight: 600;
   border: none;
-  box-shadow: 0 4px 15px rgba(0,123,255,0.3);
-  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.2); /* 統一陰影 */
+  transition: all 0.2s ease;
   cursor: pointer;
 }
-.submit-quiz-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,123,255,0.4); }
+.submit-quiz-btn:hover { transform: scale(1.05); box-shadow: 0 6px 20px rgba(0, 123, 255, 0.3); } /* 統一懸停效果 */
 
 /* 編輯器優化 */
 .editor-card {
@@ -1436,22 +1598,87 @@ onUnmounted(() => {
 
 .score-item {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-  gap: 1rem;
+  gap: 1.2rem;
+  margin-bottom: 1.2rem; /* 加大每組之間的垂直間距 */
+  padding: 0.8rem; /* Add some padding to score item for better visual */
+  border: 1px solid #eee; /* Add a subtle border */
+  border-radius: 12px; /* Match other elements */
+  background: white;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+.dark-mode .score-item {
+  background: #1a1a1a;
+  border-color: #333;
+}
+
+.score-controls {
+  display: flex;
+  gap: 1.5rem;
+  margin: 1.5rem 0;
+}
+
+.score-main {
+  display: flex;
+  align-items: baseline; /* 讓文字基線對齊 */
+  gap: 0.8rem;
+  flex: 1; /* 佔據可用空間 */
+  justify-content: space-between; /* 將名稱推到左邊，分數推到右邊 */
+}
+
+.score-val {
+  font-size: 1.8rem; /* 讓分數更顯眼 */
+  font-weight: 900;
+  color: #3b82f6; /* 使用主色調藍色 */
+  min-width: 50px; /* 確保分數顯示區域不會過度縮小 */
+  text-align: right;
+  transition: transform 0.3s ease-out, color 0.3s ease-out; /* 平滑過渡 */
+}
+.dark-mode .score-val {
+  color: #60a5fa; /* 暗黑模式下使用較亮的藍色 */
+}
+
+@keyframes score-jump {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); color: #10b981; } /* 增加時放大並變綠色 */
+  100% { transform: scale(1); }
+}
+
+.score-val.score-jump {
+  animation: score-jump 0.3s ease-out;
 }
 
 .group-name-input {
   flex: 1;
   box-sizing: border-box;
   padding: 0.3rem;
-  border: 2px solid #dee2e6;
+  border: 2px solid #007bff;
   border-radius: 8px;
   background: #fff;
   color: inherit;
   transition: all 0.3s ease;
+  max-width: 100%;
+}
+
+.group-name-display {
+  flex: 1;
+  box-sizing: border-box;
+  padding: 0.3rem;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  color: inherit;
+  transition: all 0.3s ease;
   max-width: 100%; /* 確保輸入框不會溢出 */
+  font-weight: 600;
+}
+.group-name-display:hover {
+  background: rgba(0, 123, 255, 0.05);
+  border-color: rgba(0, 123, 255, 0.1);
+}
+.group-name-display::after {
+  content: ' ✎';
+  font-size: 0.8rem;
+  opacity: 0.3;
 }
 .dark-mode .group-name-input { background: #111; border-color: #333; }
 
@@ -1460,28 +1687,40 @@ onUnmounted(() => {
   background: #007bff;
   color: white;
   border: none;
-  border-radius: 12px;
+  border-radius: 12px; /* 統一圓角 */
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 10px rgba(0,123,255,0.2);
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 8px rgba(0, 123, 255, 0.15); /* 統一陰影 */
 }
-.action-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(0,123,255,0.3); }
+.action-btn:hover { transform: scale(1.05); box-shadow: 0 6px 15px rgba(0, 123, 255, 0.25); } /* 統一懸停效果 */
 .action-btn:disabled { background: #ccc; transform: none; box-shadow: none; cursor: not-allowed; }
 
+.score-actions {
+  display: flex;
+  gap: 1.2rem; /* 拉開 -1, +1, +5 按鈕的間距 */
+}
 .score-actions button {
-  padding: 0.4rem 0.8rem;
-  margin: 0 4px;
+  padding: 0.35rem 0.7rem;
   border-radius: 8px;
   border: none;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08); /* Keep shadow */
 }
 .btn-add { background: #28a745; color: white; }
 .btn-add-lg { background: #28a745; color: white; padding: 0.4rem 1.2rem !important; }
 .btn-sub { background: #dc3545; color: white; }
 .score-actions button:hover { opacity: 0.9; transform: scale(1.05); }
+
+.preset-btns {
+  display: flex;
+  justify-content: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
 
 .presentation-timer-display {
   font-size: 3.5rem;
@@ -1613,10 +1852,11 @@ onUnmounted(() => {
   font-weight: bold;
   transition: all 0.3s;
 }
-.fs-start-btn:hover { background: #007bff; color: white; transform: scale(1.05); }
+.fs-start-btn:hover { background: #007bff; color: white; transform: scale(1.05); } /* Keep hover effects */
 .dark .fs-start-btn { border-color: #4da3ff; color: #4da3ff; }
 .dark .fs-start-btn:hover { background: #4da3ff; color: #121212; }
-.fs-trigger-btn { background-color: #6c757d; color: white; border: none; margin-left: 0.5rem; }
+.fs-trigger-btn { background-color: #6c757d; color: white; border: none; padding: 0.35rem 0.7rem; border-radius: 10px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08); transition: all 0.2s ease; }
+.fs-trigger-btn:hover { transform: scale(1.05); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); } /* Keep hover effects */
 
 .tool-desc { font-size: 0.85rem; color: inherit; opacity: 0.7; margin-bottom: 1rem; }
 .music-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
@@ -1629,10 +1869,113 @@ onUnmounted(() => {
   max-width: 100%; /* 確保按鈕不會溢出 */
   color: inherit;
   font-weight: 600;
-  transition: all 0.3s;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
-.music-btn.active { background: #007bff; color: white; border-color: #007bff; box-shadow: 0 4px 10px rgba(0, 123, 255, 0.3); }
+.music-btn.active { background: #007bff; color: white; border-color: #007bff; box-shadow: 0 4px 12px rgba(0, 123, 255, 0.25); }
+.music-btn:hover:not(.active) { transform: scale(1.05); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); }
 .music-btn:nth-child(3) { grid-column: span 2; }
+
+.refresh-btn {
+  background: none;
+  border: 1px solid #ddd;
+  padding: 3px 8px; /* 縮小 */
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); /* 輕微陰影 */
+  transition: all 0.2s ease;
+}
+.refresh-btn:hover { transform: scale(1.05); box-shadow: 0 2px 5px rgba(0, 0, 0, 0.12); }
+
+.edit-link, .delete-link {
+  padding: 0.2rem 0.5rem; /* 最小化 padding */
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  text-decoration: none; /* 確保不是下劃線 */
+  color: inherit; /* 繼承文字顏色 */
+}
+.edit-link:hover { background: rgba(0, 123, 255, 0.1); transform: scale(1.05); }
+.delete-link:hover { background: rgba(220, 53, 69, 0.1); transform: scale(1.05); }
+
+/* --- 排行榜金銀銅牌特殊樣式 --- */
+.ranking-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.rank-card {
+  display: flex;
+  align-items: center;
+  padding: 1.2rem 1.5rem;
+  border-radius: 18px;
+  border: 2px solid rgba(128, 128, 128, 0.1);
+  background: rgba(255, 255, 255, 0.5);
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  position: relative;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
+}
+
+.dark-mode .rank-card {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+/* 金牌樣式 (第 1 名) */
+.rank-1 {
+  border-color: #FFD700 !important;
+  background: rgba(255, 215, 0, 0.08) !important;
+  box-shadow: 0 10px 25px rgba(255, 215, 0, 0.2) !important;
+  transform: translateY(-3px) scale(1.02);
+  z-index: 2;
+}
+.rank-1 .rank-badge { background: linear-gradient(135deg, #FFD700, #FFA500); color: #000; }
+
+/* 銀牌樣式 (第 2 名) */
+.rank-2 {
+  border-color: #C0C0C0 !important;
+  background: rgba(192, 192, 192, 0.08) !important;
+  box-shadow: 0 8px 20px rgba(192, 192, 192, 0.1) !important;
+}
+.rank-2 .rank-badge { background: linear-gradient(135deg, #C0C0C0, #8E8E8E); color: #000; }
+
+/* 銅牌樣式 (第 3 名) */
+.rank-3 {
+  border-color: #CD7F32 !important;
+  background: rgba(205, 127, 50, 0.08) !important;
+  box-shadow: 0 8px 20px rgba(205, 127, 50, 0.1) !important;
+}
+.rank-3 .rank-badge { background: linear-gradient(135deg, #CD7F32, #8B4513); color: #fff; }
+
+.rank-badge {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 1.2rem;
+  font-weight: 900;
+  font-size: 1.2rem;
+  background: #f1f3f5;
+  color: #495057;
+  flex-shrink: 0;
+}
+
+.rank-info { flex: 1; }
+.rank-name { font-weight: 700; font-size: 1.1rem; }
+.rank-score-pill { 
+  font-weight: 800; 
+  color: #007bff; 
+  font-size: 1.2rem;
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+.dark-mode .rank-score-pill { color: #4da3ff; }
+.rank-score-pill .unit { font-size: 0.8rem; opacity: 0.6; }
 
 .publish-btn { background-color: #6610f2; color: white; border: none; }
 .publish-btn:hover { background-color: #520dc2; }
