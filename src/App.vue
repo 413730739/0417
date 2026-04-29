@@ -67,8 +67,18 @@ const pollForm = ref({
   type: 'poll' // 'poll' (選擇題) 或 'qa' (開放問答)
 });
 const isPollPublishing = ref(false);
-const pollQuestions = ref([]); // 儲存待發佈的題目列表
-const allPollResults = ref([]); // 儲存多個投票互動的統計結果
+
+// 從 localStorage 讀取快取，確保重新整理後立即顯示
+const pollQuestions = ref(JSON.parse(localStorage.getItem('poll_queue_cache') || '[]')); 
+const allPollResults = ref(JSON.parse(localStorage.getItem('poll_results_cache') || '[]'));
+
+// 監聽變動並同步至 LocalStorage
+watch(pollQuestions, (newVal) => {
+  localStorage.setItem('poll_queue_cache', JSON.stringify(newVal));
+}, { deep: true });
+watch(allPollResults, (newVal) => {
+  localStorage.setItem('poll_results_cache', JSON.stringify(newVal));
+}, { deep: true });
 
 const getPollTotal = (poll) => {
   if (poll.type === 'poll' && poll.votes) {
@@ -803,6 +813,7 @@ const formatPresentationTime = (seconds) => {
 onMounted(() => {
   timerInterval = setInterval(updateTime, 1000);
   startSync();
+  fetchPollStatus(); // 頁面載入後立即同步一次，不要等 3 秒
   setInterval(fetchPollStatus, 3000); // 投票每 3 秒同步一次
 });
 
