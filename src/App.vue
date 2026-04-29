@@ -8,7 +8,7 @@ const vFocusAuto = {
 
 // --- State Management ---
 const isDarkMode = ref(false);
-const activeTab = ref('exam'); // 'exam', 'quiz', or 'tools'
+const activeTab = ref('exam'); // 'exam', 'quiz', 'poll', or 'tools'
 const showZhuyin = ref(false);
 const isCountdownMode = ref(false);
 const isFullScreenTimer = ref(false);
@@ -58,6 +58,29 @@ let presentationInterval = null;
 
 const activeMusic = ref(null);
 let bgAudio = null;
+
+// --- Real-time Poll State (New) ---
+const POLL_DATABASE_URL = 'https://script.google.com/macros/s/AKfycbysFb5yGkcDHXnb1-kQ-1fYFrweXFl16kkCRi_FaKMxiRkt679ayMJdfxxRdl52_-38cg/exec';
+const pollForm = ref({
+  question: '',
+  options: ['', ''],
+  type: 'poll' // 'poll' (選擇題) 或 'qa' (開放問答)
+});
+const isPollPublishing = ref(false);
+const pollQuestions = ref([]); // 儲存待發佈的題目列表
+const allPollResults = ref([]); // 儲存多個投票互動的統計結果
+
+const getPollTotal = (poll) => {
+  if (poll.type === 'poll' && poll.votes) {
+    return poll.votes.reduce((sum, item) => sum + item.count, 0);
+  }
+  return poll.responses?.length || 0;
+};
+
+const getBarColor = (idx) => {
+  const colors = ['#4da3ff', '#4ade80', '#fbbf24', '#f87171', '#a78bfa', '#fb923c'];
+  return colors[idx % colors.length];
+};
 
 const presentationPresets = [3, 5, 10]; // minutes
 
@@ -189,15 +212,18 @@ const removeQuestion = async (idx) => {
   // 題目刪除後，立即同步到後端資料庫
   isPublishing.value = true;
   try {
-    const response = await fetch(DATABASE_URL, {
+    const res = await fetch(DATABASE_URL, {
       method: 'POST',
-      mode: 'no-cors',
       headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({
         action: 'publishQuiz',
         questions: quizQuestions.value
       })
     });
+
+    if (!res.ok) {
+      throw new Error(`HTTP error! status: ${res.status}`);
+    }
 
     playSound('success');
   } catch (error) {
@@ -226,16 +252,21 @@ const updateTime = () => {
   if (isCountdownMode.value) {
     const remaining = getExamRemainingSeconds();
     
-    // 當時間剛好變為 0 時觸發警報與閃爍
-    if (remaining === 0 && remainingSeconds.value > 0) {
+    // 倒數最後 10 秒：每秒播放滴答聲並啟動閃爍
+    if (remaining <= 10 && remaining > 0) {
+      if (remaining !== remainingSeconds.value) playSound('click');
+      isExamFlashing.value = true;
+    } 
+    // 當時間剛好變為 0 時觸發長警報
+    else if (remaining === 0 && remainingSeconds.value > 0) {
       playSound('alarm');
       isExamFlashing.value = true;
-    } else if (remaining > 0) {
+    } else if (remaining > 10) {
       isExamFlashing.value = false;
     }
 
-    // 預熱提醒：剩餘 3 分鐘 (180秒) 變橘色
-    isExamWarning.value = remaining <= 180 && remaining > 0;
+    // 預熱提醒：剩餘 3 分鐘 (180秒) 變橘色，直到進入最後 10 秒閃爍期
+    isExamWarning.value = remaining <= 180 && remaining > 10;
 
     // 剩餘 5 分鐘 (300秒) 時播放短促提醒
     if (remaining === 300 && remainingSeconds.value > 300) {
@@ -444,12 +475,19 @@ const togglePresentationTimer = () => {
     presentationInterval = setInterval(() => {
       if (presentationSeconds.value > 0) {
         presentationSeconds.value--;
+
+        // 倒數最後 10 秒提示：音效與閃爍
+        if (presentationSeconds.value <= 10 && presentationSeconds.value > 0) {
+          playSound('click');
+          isTimerFlashing.value = true;
+        }
+
         // 剩餘 5 分鐘提醒 (300秒)
         if (presentationSeconds.value === 300) {
           playSound('warning');
         }
-        // 預熱提醒：剩餘 3 分鐘 (180秒) 變橘色
-        isTimerWarning.value = presentationSeconds.value <= 180 && presentationSeconds.value > 0;
+        // 預熱提醒：剩餘 3 分鐘 (180秒) 變橘色，進入最後 10 秒閃爍期前停止
+        isTimerWarning.value = presentationSeconds.value <= 180 && presentationSeconds.value > 10;
       } else {
         clearInterval(presentationInterval);
         playSound('alarm');
@@ -499,9 +537,8 @@ const publishQuizToStudent = async () => {
   try {
     console.log('準備發送的題目資料：', quizQuestions.value);
     
-    const response = await fetch(DATABASE_URL, {
+    const res = await fetch(DATABASE_URL, {
       method: 'POST',
-      mode: 'no-cors',
       headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({
         action: 'publishQuiz',
@@ -509,12 +546,171 @@ const publishQuizToStudent = async () => {
       })
     });
 
+    if (!res.ok) {
+      throw new Error(`伺服器回傳錯誤: ${res.status}`);
+    }
+
     alert('測驗已成功同步至學生端！');
   } catch (error) {
     console.error('發佈出錯:', error);
     alert(`發佈失敗：${error.message}\n請確認 DATABASE_URL 是否正確，且網路連線正常。`);
   } finally {
     isPublishing.value = false;
+  }
+};
+
+// --- Real-time Poll Methods ---
+const addPollOption = () => pollForm.value.options.push('');
+const removePollOption = (idx) => pollForm.value.options.splice(idx, 1);
+
+const addPollToQueue = () => {
+  if (!pollForm.value.question.trim()) return alert('請輸入問題內容');
+  
+  const validOptions = pollForm.value.options.filter(o => o.trim() !== '');
+  if (pollForm.value.type === 'poll' && validOptions.length < 2) {
+    return alert('多選題至少需要兩個有效的選項');
+  }
+
+  pollQuestions.value.push({
+    id: Date.now() + Math.random(),
+    question: pollForm.value.question,
+    options: pollForm.value.type === 'poll' ? validOptions : [], // 開放式作答不需要固定選項
+    type: pollForm.value.type,
+    timestamp: new Date().toISOString()
+  });
+
+  // 重置表單以便輸入下一題
+  pollForm.value.question = '';
+  pollForm.value.options = ['', ''];
+  playSound('success');
+};
+
+// 監聽互動類型切換，若是簡答則不處理選項
+watch(() => pollForm.value.type, (newVal) => {
+  if (newVal === 'qa') {
+    pollForm.value.options = ['', ''];
+  }
+});
+
+const publishPoll = async () => {
+  if (pollQuestions.value.length === 0) {
+    if (!pollForm.value.question.trim()) return alert('請先新增題目到列表');
+    addPollToQueue();
+  }
+
+  isPollPublishing.value = true;
+  playSound('click');
+  
+  try {
+    console.log('[Poll] 正在同步發佈題目列表...', pollQuestions.value);
+
+    // 發送到指定的 Google Apps Script URL
+    const res = await fetch(POLL_DATABASE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        action: 'publishPoll',
+        poll: pollQuestions.value, // 發送題目陣列
+        sheetName: 'Polls' // 明確指定工作表名稱，確保後端能正確寫入
+      })
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`伺服器回傳錯誤 (${res.status}): ${errorText.substring(0, 100)}`);
+    }
+
+    // 成功發送後，立即在前端顯示該題目（即使後端試算表還沒有投票數據）
+    const newResults = pollQuestions.value.map(q => ({
+      id: q.id,
+      question: q.question,
+      type: q.type,
+      votes: q.options ? q.options.map(opt => ({ text: opt, count: 0, percent: 0 })) : [],
+      responses: []
+    }));
+
+    allPollResults.value = [...allPollResults.value, ...newResults];
+    pollQuestions.value = []; // 發布成功後清空待發佈列表
+
+    alert('即時互動已成功發佈！請確認學生端是否已更新。');
+  } catch (error) {
+    console.error('[Poll] 發佈發生異常:', error);
+    alert(`發佈失敗：${error.message}\n\n請檢查網路連線，並確認後端 GAS 是否已正確部署為「所有人」並更新至最新版本。`);
+  } finally {
+    isPollPublishing.value = false;
+  }
+};
+
+const fetchPollStatus = async () => {
+  try {
+    const response = await fetch(`${POLL_DATABASE_URL}?action=getPollResults&_t=${Date.now()}`);
+    
+    if (!response.ok) throw new Error(`HTTP 錯誤: ${response.status}`);
+
+    // 先讀取為文字，確保是有效的 JSON 格式
+    const text = await response.text();
+    if (!text || text.startsWith('<!DOCTYPE')) throw new Error('伺服器回傳格式不正確 (可能是 Google 登入頁面或錯誤訊息)');
+    const data = JSON.parse(text);
+    
+    // 解析統計數據並轉換為長條圖所需格式
+    if (Array.isArray(data)) {
+      allPollResults.value = data.map(poll => {
+        if (!poll.id) return poll; 
+        const votesArray = poll.votes ? (Array.isArray(poll.votes) ? poll.votes : Object.entries(poll.votes).map(([text, count]) => ({ text, count }))) : [];
+        const total = votesArray.reduce((sum, v) => sum + v.count, 0);
+        return {
+          ...poll,
+          votes: votesArray.map(v => ({
+            ...v,
+            percent: total > 0 ? ((v.count / total) * 100).toFixed(1) : 0
+          }))
+        };
+      });
+    }
+  } catch (error) {
+    console.warn('[Poll] 同步投票資料失敗:', error.message);
+  }
+};
+
+const deletePollItem = async (pollId) => {
+  if (!confirm('確定要刪除這筆互動題目嗎？這將會同步移除後端試算表的紀錄。')) return;
+  
+  try {
+    const res = await fetch(POLL_DATABASE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        action: 'deletePoll',
+        id: String(pollId)
+      })
+    });
+
+    if (!res.ok) throw new Error('伺服器刪除失敗');
+
+    // 本地立即過濾移除
+    allPollResults.value = allPollResults.value.filter(p => p.id !== pollId);
+    playSound('success');
+  } catch (error) {
+    console.error('刪除失敗:', error);
+    alert('刪除失敗，請檢查網路連線或後端設定。');
+  }
+};
+
+const clearPoll = async () => {
+  if (!confirm('確定要結束並清空目前的投票嗎？')) return;
+  try {
+    const res = await fetch(POLL_DATABASE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action: 'clearPoll' })
+    });
+    if (!res.ok) throw new Error('重置失敗');
+    allPollResults.value = [];
+    pollQuestions.value = []; // 同步清空待發佈列表，確保資料完全重置
+    pollForm.value.question = '';
+    alert('投票已重置');
+  } catch (e) {
+    console.error(e);
   }
 };
 
@@ -567,9 +763,8 @@ const deleteResult = async (timestamp) => {
     console.log(`[刪除請求] 嘗試刪除時間戳記: ${timestamp}`);
 
     // 發送刪除請求到統一的後端
-    await fetch(DATABASE_URL, {
+    const res = await fetch(DATABASE_URL, {
       method: 'POST',
-      mode: 'no-cors',
       headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({
         action: 'deleteResult',
@@ -578,6 +773,10 @@ const deleteResult = async (timestamp) => {
       })
     });
     
+    if (!res.ok) {
+      throw new Error(`刪除失敗，伺服器回傳: ${res.status}`);
+    }
+
     // 2. 立即從前端目前的顯示列表中移除
     studentScores.value = studentScores.value.filter(res => res.timestamp !== timestamp);
     playSound('success');
@@ -604,6 +803,7 @@ const formatPresentationTime = (seconds) => {
 onMounted(() => {
   timerInterval = setInterval(updateTime, 1000);
   startSync();
+  setInterval(fetchPollStatus, 3000); // 投票每 3 秒同步一次
 });
 
 onUnmounted(() => {
@@ -634,6 +834,10 @@ onUnmounted(() => {
           <button @click="activeTab = 'quiz'; playSound('click')" :class="{ active: activeTab === 'quiz' }">
             <ruby v-if="showZhuyin">測驗卷<rt>ㄘㄜˋ ㄧㄢˋ ㄐㄩㄢˋ</rt></ruby>
             <span v-else>測驗卷</span>
+          </button>
+          <button @click="activeTab = 'poll'; playSound('click')" :class="{ active: activeTab === 'poll' }">
+            <ruby v-if="showZhuyin">反饋與投票<rt>ㄈㄢˇ ㄎㄨㄟˋ ㄩˇ ㄊㄡˊ ㄆㄧㄠˋ</rt></ruby>
+            <span v-else>反饋與投票</span>
           </button>
           <button @click="activeTab = 'tools'; playSound('click')" :class="{ active: activeTab === 'tools' }">
             <ruby v-if="showZhuyin">互動工具<rt>ㄏㄨˋ ㄉㄨㄥˋ ㄍㄨㄥ ㄐㄩˋ</rt></ruby>
@@ -752,6 +956,112 @@ onUnmounted(() => {
       </div>
       <div v-else class="empty-msg-card list-section">
         <p class="empty-msg">目前沒有考試項目。</p>
+      </div>
+    </main>
+
+    <main class="container" v-else-if="activeTab === 'poll'">
+      <div class="dashboard-card text-center mb-2">
+        <h2>📊 課堂反饋與投票系統</h2>
+        <p class="tool-desc">發起即時投票或開放式問題，並即時查看學生端回傳的統計結果。</p>
+      </div>
+
+      <div class="info-section">
+        <!-- 投票編輯器 -->
+        <div class="input-card">
+          <h3>新增互動題目</h3>
+          <div class="form-group">
+            <label>互動類型：</label>
+            <select v-model="pollForm.type" class="type-select">
+              <option value="poll">多選一投票 (單選)</option>
+              <option value="qa">開放式簡答</option>
+            </select>
+          </div>
+          <p v-if="pollForm.type === 'qa'" class="tool-desc" style="color: #6610f2; margin-top: -0.5rem;">💡 簡答模式下，學生可自由輸入文字，無需設定標準答案。</p>
+          <div class="form-group">
+            <label>問題：</label>
+            <textarea v-model="pollForm.question" placeholder="例如：這題的答案你認為是？" class="q-textarea"></textarea>
+          </div>
+          
+          <div v-if="pollForm.type === 'poll'" class="options-edit">
+            <label>投票選項：</label>
+            <div v-for="(opt, idx) in pollForm.options" :key="idx" class="opt-row">
+              <span class="q-num">{{ String.fromCharCode(65 + idx) }}.</span>
+              <input v-model="pollForm.options[idx]" placeholder="選項內容" class="opt-input">
+              <button @click="removePollOption(idx)" class="delete-btn-sm">✕</button>
+            </div>
+            <button @click="addPollOption" class="add-opt-btn" style="margin-bottom: 1rem;">+ 新增選項</button>
+          </div>
+
+          <button @click="addPollToQueue" class="add-btn w-full">➕ 加入發佈列表</button>
+
+          <!-- 待發佈題目預覽 -->
+          <div v-if="pollQuestions.length > 0" class="mt-2" style="border-top: 1px solid #eee; padding-top: 1rem;">
+            <h4 class="mb-1" style="font-size: 1rem;">待發佈列表 ({{ pollQuestions.length }})</h4>
+            <div v-for="(q, idx) in pollQuestions" :key="q.id" class="qa-bubble" style="font-size: 0.85rem; padding: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+               <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 80%;">{{ idx + 1 }}. {{ q.question }}</span>
+               <button @click="pollQuestions.splice(idx, 1)" class="delete-link" style="color: #dc3545; font-size: 0.75rem;">移除</button>
+            </div>
+          </div>
+
+          <div class="button-group-vertical">
+            <button @click="publishPoll" class="publish-btn action-btn w-full" :disabled="isPollPublishing">
+              {{ isPollPublishing ? '發佈中...' : '🚀 一次發佈所有題目' }}
+            </button>
+            <button @click="clearPoll" class="delete-btn w-full">清空當前資料</button>
+          </div>
+        </div>
+
+        <!-- 即時統計結果 -->
+        <div class="display-card">
+          <h3>📈 投票統計結果</h3>
+          <div v-if="allPollResults.length === 0 || allPollResults.every(p => p.type !== 'poll')" class="empty-msg">尚未發佈投票或目前無統計資料...</div>
+          <div v-for="(poll, pIdx) in allPollResults.filter(p => p.type === 'poll')" :key="pIdx" class="poll-result-item mb-2">
+            <div class="q-header">
+              <h4 class="poll-question-title">🚀 {{ poll.question }}</h4>
+              <button @click="deletePollItem(poll.id)" class="delete-link">刪除題目</button>
+            </div>
+            <div class="poll-meta">總計回覆：<span class="highlight">{{ getPollTotal(poll) }}</span> 份</div>
+            
+            <div v-if="poll.type === 'poll'" class="poll-chart">
+              <div v-for="(data, idx) in poll.votes" :key="idx" class="chart-item">
+                <div class="chart-label">
+                  <span>{{ data.text }}</span>
+                  <span class="vote-count">{{ data.count }} 票 ({{ data.percent }}%)</span>
+                </div>
+                <div class="chart-bar-bg">
+                  <div class="chart-bar-fill" :style="{ 
+                    width: data.percent + '%',
+                    backgroundColor: getBarColor(idx),
+                    backgroundImage: 'none'
+                  }"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="mt-2 text-center" style="font-size: 0.8rem; opacity: 0.6;">
+            每 3 秒自動同步數據
+          </div>
+        </div>
+      </div>
+      
+      <div class="list-section">
+        <div class="list-card">
+          <h3>💬 開放式回答回饋</h3>
+          <div v-if="allPollResults.filter(p => p.type === 'qa').length === 0" class="empty-msg">目前尚無簡答回饋資料。</div>
+          <div v-for="(poll, pIdx) in allPollResults.filter(p => p.type === 'qa')" :key="pIdx" class="mb-2">
+            <div class="q-header">
+              <h4 class="poll-question-title" style="color: #6610f2;">📌 {{ poll.question }} ({{ getPollTotal(poll) }} 份回答)</h4>
+              <button @click="deletePollItem(poll.id)" class="delete-link">刪除題目</button>
+            </div>
+            <div class="qa-results">
+              <div v-if="!poll.responses || poll.responses.length === 0" class="empty-msg">等待大家的回答中...</div>
+              <div v-for="(res, idx) in poll.responses" :key="idx" class="qa-bubble">
+                <strong class="student-name">{{ res.name }}:</strong> {{ res.text }}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
 
@@ -1266,6 +1576,7 @@ onUnmounted(() => {
   cursor: pointer;
   font-weight: 600;
   margin-top: 1rem;
+  margin-bottom: 1rem;
   box-shadow: 0 4px 10px rgba(40, 167, 69, 0.15);
   transition: all 0.2s ease;
 }
@@ -1375,12 +1686,16 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 1.5rem;
+  flex-wrap: wrap;
+  row-gap: 0.8rem;
 }
 .group-controls {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.8rem;
+  flex-wrap: wrap;
+  row-gap: 0.8rem;
 }
 .form-group.inline {
   display: flex;
@@ -1615,6 +1930,8 @@ onUnmounted(() => {
   display: flex;
   gap: 1.5rem;
   margin: 1.5rem 0;
+  flex-wrap: wrap;
+  row-gap: 0.8rem;
 }
 
 .score-main {
@@ -1983,8 +2300,66 @@ onUnmounted(() => {
 .student-results-card { border-top: 4px solid #6610f2; }
 .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
 .refresh-btn { background: none; border: 1px solid #ddd; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+
+/* Poll Specific Styles */
+.poll-question-title { color: #007bff; margin-bottom: 0.5rem; font-size: 1.3rem; }
+.poll-meta { font-size: 0.9rem; opacity: 0.8; margin-bottom: 1rem; }
+.highlight { color: #6610f2; font-weight: bold; }
+
+/* Poll Chart Styles */
+.poll-chart { margin-top: 1rem; }
+.chart-item { margin-bottom: 1.2rem; }
+.chart-label { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 4px; }
+.chart-bar-bg { background: #eee; height: 12px; border-radius: 6px; overflow: hidden; }
+.dark-mode .chart-bar-bg { background: #333; }
+.chart-bar-fill { 
+  background: linear-gradient(90deg, #007bff, #00d4ff); 
+  height: 100%; 
+  border-radius: 6px;
+  transition: width 0.5s ease-out; 
+}
+.qa-bubble {
+  background: rgba(0, 123, 255, 0.05);
+  border: 1px solid rgba(0, 123, 255, 0.1);
+  padding: 0.8rem;
+  border-radius: 12px;
+  margin-bottom: 0.8rem;
+}
+.dark-mode .qa-bubble { background: rgba(255, 255, 255, 0.05); }
+.student-name { color: #007bff; margin-right: 5px; }
+.w-full { width: 100%; }
+.mt-2 { margin-top: 1rem; }
+.mt-4 { margin-top: 1.5rem; }
+.mb-2 { margin-bottom: 2rem; }
+.text-center { text-align: center; }
+.button-group-vertical { 
+  display: flex; 
+  flex-direction: column; 
+  gap: 0.8rem; 
+  margin-top: 1rem;
+}
+
 .text-success { color: #28a745; font-weight: bold; }
 .text-danger { color: #dc3545; font-weight: bold; }
 .status-pill { background: #e3f2fd; color: #0d47a1; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; }
 .empty-msg { padding: 2rem !important; color: #999; }
+
+.poll-result-item {
+  border-bottom: 1px dashed #eee; 
+  padding-bottom: 1.5rem; 
+  margin-bottom: 1.5rem;
+}
+.dark-mode .poll-result-item { border-bottom-color: #333; }
+
+.q-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.2rem;
+  gap: 1.5rem;
+  padding-top: 0.5rem;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.05);
+  padding-bottom: 0.5rem;
+}
+.dark-mode .q-header { border-bottom-color: rgba(255, 255, 255, 0.05); }
 </style>
