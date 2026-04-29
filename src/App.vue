@@ -60,7 +60,7 @@ const activeMusic = ref(null);
 let bgAudio = null;
 
 // --- Real-time Poll State (New) ---
-const POLL_DATABASE_URL = 'https://script.google.com/macros/s/AKfycbysFb5yGkcDHXnb1-kQ-1fYFrweXFl16kkCRi_FaKMxiRkt679ayMJdfxxRdl52_-38cg/exec';
+const POLL_DATABASE_URL = 'https://script.google.com/macros/s/AKfycbxcPLSDEW3rL96lfSH9N0zTbfGSG-0xM8jMR7QAaR0t52XQoBAwj7pqVJFnemUNRE6fKg/exec';
 const pollForm = ref({
   question: '',
   options: ['', ''],
@@ -71,6 +71,7 @@ const isPollPublishing = ref(false);
 // 從 localStorage 讀取快取，確保重新整理後立即顯示
 const pollQuestions = ref(JSON.parse(localStorage.getItem('poll_queue_cache') || '[]')); 
 const allPollResults = ref(JSON.parse(localStorage.getItem('poll_results_cache') || '[]'));
+const deletedPollIds = ref(new Set(JSON.parse(localStorage.getItem('poll_deleted_ids_cache') || '[]'))); // 持久化黑名單
 
 // 監聽變動並同步至 LocalStorage
 watch(pollQuestions, (newVal) => {
@@ -78,6 +79,9 @@ watch(pollQuestions, (newVal) => {
 }, { deep: true });
 watch(allPollResults, (newVal) => {
   localStorage.setItem('poll_results_cache', JSON.stringify(newVal));
+}, { deep: true });
+watch(deletedPollIds, (newVal) => {
+  localStorage.setItem('poll_deleted_ids_cache', JSON.stringify(Array.from(newVal)));
 }, { deep: true });
 
 const getPollTotal = (poll) => {
@@ -102,7 +106,7 @@ const studentSiteUrl = 'https://413730739.github.io/0417-2/';
 
 // --- 資料庫配置 ---
 // 此 URL 用於處理所有後端邏輯：包含發布題目、獲取學生成績以及刪除紀錄
-const DATABASE_URL = 'https://script.google.com/macros/s/AKfycbyR7t58ExcpPfuuEY6wPz4ctdJg_V9fQ0klVnopEHYnYvn-DF-OzL8YxJTtKCI1h5nvCQ/exec';
+const DATABASE_URL = 'https://script.google.com/macros/s/AKfycbyHUlQvBFXi6gtHqrLvS5dVKKDf8RLNSGGnxJs85zybPsmPT-X6DCwKR8gDkdq92VgSLA/exec';
 
 // 從 localStorage 讀取已儲存的題目，若無則初始化為空陣列
 const quizQuestions = ref(JSON.parse(localStorage.getItem('teacher_quiz_questions') || '[]'));
@@ -612,15 +616,27 @@ const publishPoll = async () => {
   playSound('click');
   
   try {
-    console.log('[Poll] 正在同步發佈題目列表...', pollQuestions.value);
+    // 1. 取得目前已經在線上的題目定義（從 allPollResults 提取結構）
+    const existingPolls = allPollResults.value.map(p => ({
+      id: p.id,
+      question: p.question,
+      // 從現有的 votes 提取選項文字，確保格式正確
+      options: p.type === 'poll' ? (p.votes ? p.votes.map(v => v.text) : (p.options || [])) : [],
+      type: p.type,
+      timestamp: p.timestamp || new Date().toISOString()
+    }));
 
-    // 發送到指定的 Google Apps Script URL
+    // 2. 合併現有題目與待發佈的新題目
+    const combinedPolls = [...existingPolls, ...pollQuestions.value];
+
+    console.log('[Poll] 正在發佈完整題目清單（含舊題目）...', combinedPolls);
+
     const res = await fetch(POLL_DATABASE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({
         action: 'publishPoll',
-        poll: pollQuestions.value, // 發送題目陣列
+        poll: combinedPolls, // 改為發送合併後的完整清單
         sheetName: 'Polls' // 明確指定工作表名稱，確保後端能正確寫入
       })
     });
@@ -661,20 +677,67 @@ const fetchPollStatus = async () => {
     const text = await response.text();
     if (!text || text.startsWith('<!DOCTYPE')) throw new Error('伺服器回傳格式不正確 (可能是 Google 登入頁面或錯誤訊息)');
     const data = JSON.parse(text);
+
+    console.log('[Debug] 接收到的原始投票資料:', data);
     
-    // 解析統計數據並轉換為長條圖所需格式
+    // 1. 增強資料結構的容錯性：處理 data 直接是陣列或包在 data.data / data.polls 中的情況
+    let pollsArray = [];
     if (Array.isArray(data)) {
-      allPollResults.value = data.map(poll => {
-        if (!poll.id) return poll; 
-        const votesArray = poll.votes ? (Array.isArray(poll.votes) ? poll.votes : Object.entries(poll.votes).map(([text, count]) => ({ text, count }))) : [];
-        const total = votesArray.reduce((sum, v) => sum + v.count, 0);
-        return {
-          ...poll,
-          votes: votesArray.map(v => ({
-            ...v,
-            percent: total > 0 ? ((v.count / total) * 100).toFixed(1) : 0
-          }))
-        };
+      pollsArray = data;
+    } else if (data && Array.isArray(data.data)) {
+      pollsArray = data.data;
+    } else if (data && Array.isArray(data.polls)) {
+      pollsArray = data.polls;
+    }
+
+    if (pollsArray.length > 0) {
+      // 自動清理：如果黑名單中的 ID 在伺服器端已經徹底消失，就從黑名單移除
+      const serverIds = new Set(pollsArray.map(p => String(p.id)));
+      let cacheChanged = false;
+      deletedPollIds.value.forEach(id => {
+        if (!serverIds.has(id)) {
+          deletedPollIds.value.delete(id);
+          cacheChanged = true;
+        }
+      });
+      if (cacheChanged) {
+        localStorage.setItem('poll_deleted_ids_cache', JSON.stringify(Array.from(deletedPollIds.value)));
+      }
+
+      // 過濾掉尚未被後端刪除（但在本地黑名單中）的項目
+      const filteredPolls = pollsArray.filter(poll => !deletedPollIds.value.has(String(poll.id)));
+
+      const processedPolls = filteredPolls.map(poll => {
+        const responses = poll.responses || [];
+        const total = responses.length;
+
+        // 強制根據原始 responses 重新計算統計，確保「每一筆作答都算一票」
+        if (poll.type === 'poll') {
+          const options = poll.options || [];
+          const counts = {};
+          responses.forEach(r => {
+            // 整合所有可能的作答欄位名稱 (text, answer, value, 答案)，並進行正規化處理
+            const val = (r.text || r.answer || r.value || r.答案 || '').toString().trim().toLowerCase();
+            if (val) counts[val] = (counts[val] || 0) + 1;
+          });
+          return {
+            ...poll,
+            responses,
+            votes: options.map(opt => { // 針對選項也進行正規化處理
+              const normalizedOpt = opt.toString().trim().toLowerCase();
+              const c = counts[normalizedOpt] || 0;
+              return { text: opt, count: c, percent: total > 0 ? ((c / total) * 100).toFixed(1) : 0 };
+            })
+          };
+        }
+        return { ...poll, responses };
+      });
+
+      console.log('[Debug] 處理後的統計資料:', processedPolls);
+
+      // 排序：將最新的互動（ID 較大/時間較新者）排在最前面，方便管理不斷增加的題目
+      allPollResults.value = processedPolls.sort((a, b) => {
+        return parseFloat(b.id) - parseFloat(a.id);
       });
     }
   } catch (error) {
@@ -685,6 +748,9 @@ const fetchPollStatus = async () => {
 const deletePollItem = async (pollId) => {
   if (!confirm('確定要刪除這筆互動題目嗎？這將會同步移除後端試算表的紀錄。')) return;
   
+  // 1. 立即加入本地黑名單，防止 3 秒一次的自動同步導致資料閃回
+  deletedPollIds.value.add(String(pollId));
+
   try {
     const res = await fetch(POLL_DATABASE_URL, {
       method: 'POST',
@@ -716,6 +782,7 @@ const clearPoll = async () => {
     });
     if (!res.ok) throw new Error('重置失敗');
     allPollResults.value = [];
+    deletedPollIds.value.clear(); // 清空所有黑名單
     pollQuestions.value = []; // 同步清空待發佈列表，確保資料完全重置
     pollForm.value.question = '';
     alert('投票已重置');
@@ -730,6 +797,8 @@ const fetchStudentResults = async () => {
     const response = await fetch(`${DATABASE_URL}?action=getResults&_t=${Date.now()}`);
     const data = await response.json();
     
+    console.log('[Debug] 接收到的原始學生練習成績:', data);
+
     if (Array.isArray(data)) {
       // 獲取伺服器端所有的時間戳記，用來檢查後端是否已經完成物理刪除
       const serverTimestamps = new Set(data.map(res => res.timestamp));
@@ -796,6 +865,33 @@ const deleteResult = async (timestamp) => {
   } finally {
     isPublishing.value = false;
   }
+};
+
+const getGroupedQaResponses = (responses) => {
+  if (!responses || responses.length === 0) return [];
+  const total = responses.length;
+  const grouped = {};
+  responses.forEach(res => {
+    console.log('[Debug] 正在處理單筆作答內容:', res);
+    // 整合所有可能的作答欄位名稱 (text, answer, value, 答案)
+    const val = (res.text || res.answer || res.value || res.答案 || '').toString().trim();
+    if (!val) return;
+    const key = val;
+    if (grouped[key]) {
+      grouped[key].count++;
+    } else {
+      grouped[key] = {
+        text: val,
+        count: 1,
+      };
+    }
+  });
+  return Object.values(grouped)
+    .map(item => ({
+      ...item,
+      percent: ((item.count / total) * 100).toFixed(1)
+    }))
+    .sort((a, b) => b.count - a.count);
 };
 
 let syncInterval = null;
@@ -973,7 +1069,7 @@ onUnmounted(() => {
     <main class="container" v-else-if="activeTab === 'poll'">
       <div class="dashboard-card text-center mb-2">
         <h2>📊 課堂反饋與投票系統</h2>
-        <p class="tool-desc">發起即時投票或開放式問題，並即時查看學生端回傳的統計結果。</p>
+        <p class="tool-desc">發起即時互動，目前共有 <span class="highlight">{{ allPollResults.length }}</span> 個活動記錄。</p>
       </div>
 
       <div class="info-section">
@@ -1026,7 +1122,7 @@ onUnmounted(() => {
         <div class="display-card">
           <h3>📈 投票統計結果</h3>
           <div v-if="allPollResults.length === 0 || allPollResults.every(p => p.type !== 'poll')" class="empty-msg">尚未發佈投票或目前無統計資料...</div>
-          <div v-for="(poll, pIdx) in allPollResults.filter(p => p.type === 'poll')" :key="pIdx" class="poll-result-item mb-2">
+          <div v-for="poll in allPollResults.filter(p => p.type === 'poll')" :key="poll.id" class="poll-result-item mb-2">
             <div class="q-header">
               <h4 class="poll-question-title">🚀 {{ poll.question }}</h4>
               <button @click="deletePollItem(poll.id)" class="delete-link">刪除題目</button>
@@ -1060,15 +1156,27 @@ onUnmounted(() => {
         <div class="list-card">
           <h3>💬 開放式回答回饋</h3>
           <div v-if="allPollResults.filter(p => p.type === 'qa').length === 0" class="empty-msg">目前尚無簡答回饋資料。</div>
-          <div v-for="(poll, pIdx) in allPollResults.filter(p => p.type === 'qa')" :key="pIdx" class="mb-2">
+          <div v-for="poll in allPollResults.filter(p => p.type === 'qa')" :key="poll.id" class="mb-2">
             <div class="q-header">
               <h4 class="poll-question-title" style="color: #6610f2;">📌 {{ poll.question }} ({{ getPollTotal(poll) }} 份回答)</h4>
               <button @click="deletePollItem(poll.id)" class="delete-link">刪除題目</button>
-            </div>
+            </div> 
             <div class="qa-results">
-              <div v-if="!poll.responses || poll.responses.length === 0" class="empty-msg">等待大家的回答中...</div>
-              <div v-for="(res, idx) in poll.responses" :key="idx" class="qa-bubble">
-                <strong class="student-name">{{ res.name }}:</strong> {{ res.text }}
+              <div v-if="!poll.responses || poll.responses.length === 0" class="empty-msg">等待大家的回答中...</div> 
+              <div v-else> 
+                <div v-for="(item, idx) in getGroupedQaResponses(poll.responses)" :key="idx" class="chart-item" style="background: rgba(102, 16, 242, 0.03); padding: 10px; border-radius: 12px; margin-bottom: 8px;">
+                  <div class="chart-label">
+                    <span>{{ item.text }}</span>
+                    <span class="vote-count">{{ item.count }} 票 ({{ item.percent }}%)</span>
+                  </div>
+                  <div class="chart-bar-bg">
+                    <div class="chart-bar-fill" :style="{ 
+                      width: item.percent + '%',
+                      backgroundColor: getBarColor(idx + 4), 
+                      backgroundImage: 'none'
+                    }"></div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -2323,8 +2431,12 @@ onUnmounted(() => {
 .chart-label { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 4px; }
 .chart-bar-bg { background: #eee; height: 12px; border-radius: 6px; overflow: hidden; }
 .dark-mode .chart-bar-bg { background: #333; }
+.vote-count {
+  color: #6610f2;
+  font-family: 'Courier New', monospace;
+  font-weight: 800;
+}
 .chart-bar-fill { 
-  background: linear-gradient(90deg, #007bff, #00d4ff); 
   height: 100%; 
   border-radius: 6px;
   transition: width 0.5s ease-out; 
