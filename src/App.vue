@@ -84,6 +84,15 @@ watch(deletedPollIds, (newVal) => {
   localStorage.setItem('poll_deleted_ids_cache', JSON.stringify(Array.from(newVal)));
 }, { deep: true });
 
+// 監聽頁籤切換，當進入「測驗卷」或「反饋與投票」時立即更新最新資料
+watch(activeTab, (newTab) => {
+  if (newTab === 'quiz') {
+    fetchStudentResults();
+  } else if (newTab === 'poll') {
+    fetchPollStatus();
+  }
+});
+
 // 監聽考試時間輸入，強制限制範圍 (小時 0-24, 分鐘 0-60)
 watch(examStartHour, (val) => {
   if (val === '') return;
@@ -127,12 +136,12 @@ const presentationPresets = [3, 5, 10]; // minutes
 // 4. Digital Quiz System
 const isPublishing = ref(false);
 const studentScores = ref([]); // 儲存從學生端傳回的成績
-const deletedTimestamps = ref(new Set(JSON.parse(localStorage.getItem('deleted_results_cache') || '[]')));
+const deletedTimestamps = ref(new Set(JSON.parse(localStorage.getItem('deleted_results_cache') || '[]'))); // 新增：用於本地快取刪除的時間戳記，防止資料閃回
 const studentSiteUrl = 'https://413730739.github.io/0417-2/';
 
 // --- 資料庫配置 ---
 // 此 URL 用於處理所有後端邏輯：包含發布題目、獲取學生成績以及刪除紀錄
-const DATABASE_URL = 'https://script.google.com/macros/s/AKfycbxgCLOipsnuhxbQmxGi_Wl3ndHESVaxjQ4qc4BPgdWmSZPOlQWnrwdDTE5N34LMaBwGHA/exec';
+const DATABASE_URL = 'https://script.google.com/macros/s/AKfycbxLSLXbOQBjMii0WXi3YNbGLAFA6FxLwsBDhUrLlR942HecqgS19hM-nuDxFeULk9y3gg/exec';
 
 // 從 localStorage 讀取已儲存的題目，若無則初始化為空陣列
 const quizQuestions = ref(JSON.parse(localStorage.getItem('teacher_quiz_questions') || '[]'));
@@ -244,36 +253,17 @@ const addQuestionToQuiz = () => {
   // Reset form
   quizForm.value = { type: 'single', question: '', options: ['', ''], answer: null, explanation: '' };
   playSound('success'); // 播放成功音效提醒已儲存
+  
+  // 自動同步到後端，確保「教師端沒刪，題目會一直存在」且「新增即同步」
+  syncQuizToBackend(true); 
 };
 
 const removeQuestion = async (idx) => {
   if (!confirm('確定要刪除此題目嗎？刪除後將自動同步更新學生端的題庫。')) return;
   
   quizQuestions.value.splice(idx, 1);
-  
-  // 題目刪除後，立即同步到後端資料庫
-  isPublishing.value = true;
-  try {
-    const res = await fetch(DATABASE_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({
-        action: 'publishQuiz',
-        questions: quizQuestions.value
-      })
-    });
-
-    if (!res.ok) {
-      throw new Error(`HTTP error! status: ${res.status}`);
-    }
-
-    playSound('success');
-  } catch (error) {
-    console.error('同步刪除失敗:', error);
-    alert('刪除成功但同步至學生端失敗，請手動點擊「發佈到學生端」按鈕。');
-  } finally {
-    isPublishing.value = false;
-  }
+  // 執行同步：因為後端 GAS 會 clear() 重新寫入，所以本地刪除後同步即達成後端刪除
+  syncQuizToBackend(true);
 };
 
 // --- Methods ---
@@ -567,39 +557,38 @@ const toggleMusic = (type) => {
   activeMusic.value = type;
 };
 
-// Quiz Methods
-const publishQuizToStudent = async () => {
+// --- Quiz Sync Core Logic ---
+// 統一處理測驗卷同步，對接 GAS 的 action: 'publishQuiz'
+const syncQuizToBackend = async (silent = false) => {
   if (quizQuestions.value.length === 0) {
-    if (!confirm('目前題庫為空，確定要清空學生端的所有題目嗎？')) return;
+    if (!silent && !confirm('目前題庫為空，確定要清空學生端的所有題目嗎？')) return;
   }
   
   isPublishing.value = true;
-  playSound('click');
+  if (!silent) playSound('click');
   
   try {
-    console.log('準備發送的題目資料：', quizQuestions.value);
-    
     const res = await fetch(DATABASE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({
         action: 'publishQuiz',
-        questions: quizQuestions.value
+        questions: quizQuestions.value // 將整個陣列傳送，後端會執行 setValue(JSON.stringify(...))
       })
     });
 
-    if (!res.ok) {
-      throw new Error(`伺服器回傳錯誤: ${res.status}`);
-    }
-
-    alert('測驗已成功同步至學生端！');
+    if (!res.ok) throw new Error(`伺服器回傳錯誤: ${res.status}`);
+    if (!silent) alert('測驗已成功同步至學生端！');
+    playSound('success');
   } catch (error) {
-    console.error('發佈出錯:', error);
-    alert(`發佈失敗：${error.message}\n請確認 DATABASE_URL 是否正確，且網路連線正常。`);
+    console.error('同步出錯:', error);
+    if (!silent) alert(`發佈失敗：${error.message}`);
   } finally {
     isPublishing.value = false;
   }
 };
+
+const publishQuizToStudent = () => syncQuizToBackend(false);
 
 // --- Real-time Poll Methods ---
 const addPollOption = () => pollForm.value.options.push('');
@@ -879,42 +868,56 @@ const fetchStudentResults = async () => {
 };
 
 const deleteResult = async (timestamp) => {
-  if (!confirm('確定要刪除這筆成績紀錄嗎？')) return;
+  if (!confirm('確定要刪除這筆成績紀錄嗎？刪除後將同步移除後端試算表的紀錄。')) return;
   
   isPublishing.value = true; // 顯示同步狀態
   playSound('click');
+
   try {
-    // 1. 立即加入本地黑名單
+    // 1. 立即加入本地黑名單，防止非同步獲取資料時閃回
     deletedTimestamps.value.add(timestamp);
-    
-    // 將黑名單同步到 localStorage，確保重新整理頁面後，還沒被後端刪掉的資料不會重新出現
     localStorage.setItem('deleted_results_cache', JSON.stringify(Array.from(deletedTimestamps.value)));
 
-    console.log(`[刪除請求] 嘗試刪除時間戳記: ${timestamp}`);
+    console.log(`[刪除請求] 準備刪除時間戳記: ${timestamp}`);
 
-    // 發送刪除請求到統一的後端
     const res = await fetch(DATABASE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({
         action: 'deleteResult',
-        timestamp: String(timestamp), // 強制轉為字串確保後端比對一致
-        sheetName: 'Results' // 明確指定刪除 Results 工作表的資料
+        timestamp: String(timestamp), // 傳送時間戳記供後端比對
+        sheetName: 'Results'
       })
     });
     
-    const result = await res.json();
+    // 檢查回傳內容是否為 JSON
+    const text = await res.text();
+    let result;
+    try {
+      result = JSON.parse(text);
+    } catch (e) {
+      console.error('[刪除] 解析回傳失敗:', text);
+      // 若失敗但 HTTP 狀態為 200，可能 GAS 已執行但回傳格式有誤，此時仍維持黑名單
+      if (!res.ok) throw new Error('後端服務回傳格式錯誤 (HTML)');
+      result = { status: 'success' }; 
+    }
     
     if (!res.ok || result.status !== 'success') {
       throw new Error(result.message || `刪除失敗，伺服器回傳: ${res.status}`);
     }
 
+    console.log(`[刪除成功] 時間戳記 ${timestamp} 已從後端試算表移除`);
+
     // 2. 立即從前端目前的顯示列表中移除
     studentScores.value = studentScores.value.filter(res => res.timestamp !== timestamp);
     playSound('success');
+    alert('成績已成功刪除，後端試算表也將同步更新。');
   } catch (error) {
-    console.error('刪除失敗:', error);
-    alert(`刪除失敗：${error.message}`);
+    console.error('[刪除失敗]:', error);
+    // 發生嚴重錯誤時，將其從黑名單移除以反映真實狀態
+    deletedTimestamps.value.delete(timestamp);
+    localStorage.setItem('deleted_results_cache', JSON.stringify(Array.from(deletedTimestamps.value)));
+    alert(`刪除失敗：${error.message}\n\n請確認網路連線正常，並檢查後端 GAS 是否已部署為「所有人」存取。`);
   } finally {
     isPublishing.value = false;
   }
@@ -961,6 +964,7 @@ const formatPresentationTime = (seconds) => {
 // --- Lifecycle ---
 onMounted(() => {
   timerInterval = setInterval(updateTime, 1000);
+  fetchStudentResults(); // 初始載入立即獲取成績，不用等 5 秒
   startSync();
   fetchPollStatus(); // 頁面載入後立即同步一次，不要等 3 秒
   setInterval(fetchPollStatus, 3000); // 投票每 3 秒同步一次
@@ -2571,6 +2575,9 @@ onUnmounted(() => {
 .text-danger { color: #dc3545; font-weight: bold; }
 .status-pill { background: #e3f2fd; color: #0d47a1; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; }
 .empty-msg { padding: 2rem !important; color: #999; }
+.dark-mode .empty-msg { color: #9ca3af; }
+.empty-msg-card { background: white; border: 1px solid rgba(0,0,0,0.05); border-radius: 24px; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+.dark-mode .empty-msg-card { background: #2d3748; border-color: rgba(74, 85, 104, 0.5); color: #e2e8f0; }
 
 .poll-result-item {
   border-bottom: 1px dashed #eee; 
