@@ -60,7 +60,7 @@ const activeMusic = ref(null);
 let bgAudio = null;
 
 // --- Real-time Poll State (New) ---
-const POLL_DATABASE_URL = 'https://script.google.com/macros/s/AKfycbxcPLSDEW3rL96lfSH9N0zTbfGSG-0xM8jMR7QAaR0t52XQoBAwj7pqVJFnemUNRE6fKg/exec';
+const POLL_DATABASE_URL = 'https://script.google.com/macros/s/AKfycbxgCLOipsnuhxbQmxGi_Wl3ndHESVaxjQ4qc4BPgdWmSZPOlQWnrwdDTE5N34LMaBwGHA/exec';
 const pollForm = ref({
   question: '',
   options: ['', ''],
@@ -106,7 +106,7 @@ const studentSiteUrl = 'https://413730739.github.io/0417-2/';
 
 // --- 資料庫配置 ---
 // 此 URL 用於處理所有後端邏輯：包含發布題目、獲取學生成績以及刪除紀錄
-const DATABASE_URL = 'https://script.google.com/macros/s/AKfycbyHUlQvBFXi6gtHqrLvS5dVKKDf8RLNSGGnxJs85zybPsmPT-X6DCwKR8gDkdq92VgSLA/exec';
+const DATABASE_URL = 'https://script.google.com/macros/s/AKfycbxgCLOipsnuhxbQmxGi_Wl3ndHESVaxjQ4qc4BPgdWmSZPOlQWnrwdDTE5N34LMaBwGHA/exec';
 
 // 從 localStorage 讀取已儲存的題目，若無則初始化為空陣列
 const quizQuestions = ref(JSON.parse(localStorage.getItem('teacher_quiz_questions') || '[]'));
@@ -203,6 +203,7 @@ const addQuestionToQuiz = () => {
       };
     }
     editingId.value = null;
+    showQuizEditor.value = false; // 只有編輯完成才關閉視窗
   } else {
     const newQ = {
       ...quizForm.value,
@@ -211,11 +212,12 @@ const addQuestionToQuiz = () => {
       userAnswer: quizForm.value.type === 'multiple' ? [] : null
     };
     quizQuestions.value.push(newQ);
+    // 新增模式下保持視窗開啟，方便「依序加入」
   }
   
   // Reset form
   quizForm.value = { type: 'single', question: '', options: ['', ''], answer: null, explanation: '' };
-  showQuizEditor.value = false;
+  playSound('success'); // 播放成功音效提醒已儲存
 };
 
 const removeQuestion = async (idx) => {
@@ -669,7 +671,7 @@ const publishPoll = async () => {
 
 const fetchPollStatus = async () => {
   try {
-    const response = await fetch(`${POLL_DATABASE_URL}?action=getPollResults&_t=${Date.now()}`);
+    const response = await fetch(`${POLL_DATABASE_URL}?action=getPollResults&sheetName=PollResults&_t=${Date.now()}`);
     
     if (!response.ok) throw new Error(`HTTP 錯誤: ${response.status}`);
 
@@ -679,67 +681,85 @@ const fetchPollStatus = async () => {
     const data = JSON.parse(text);
 
     console.log('[Debug] 接收到的原始投票資料:', data);
-    
-    // 1. 增強資料結構的容錯性：處理 data 直接是陣列或包在 data.data / data.polls 中的情況
-    let pollsArray = [];
-    if (Array.isArray(data)) {
-      pollsArray = data;
-    } else if (data && Array.isArray(data.data)) {
-      pollsArray = data.data;
-    } else if (data && Array.isArray(data.polls)) {
-      pollsArray = data.polls;
-    }
 
-    if (pollsArray.length > 0) {
-      // 自動清理：如果黑名單中的 ID 在伺服器端已經徹底消失，就從黑名單移除
-      const serverIds = new Set(pollsArray.map(p => String(p.id)));
-      let cacheChanged = false;
-      deletedPollIds.value.forEach(id => {
-        if (!serverIds.has(id)) {
-          deletedPollIds.value.delete(id);
-          cacheChanged = true;
-        }
-      });
-      if (cacheChanged) {
-        localStorage.setItem('poll_deleted_ids_cache', JSON.stringify(Array.from(deletedPollIds.value)));
+    // 預期從 GAS 接收到 { definitions: [...], submissions: [...] } 格式的資料
+    const pollDefinitions = data.definitions || [];
+    const pollSubmissions = data.submissions || [];
+
+    // 自動清理：如果黑名單中的 ID 在伺服器端已經徹底消失，就從黑名單移除
+    const serverIds = new Set(pollDefinitions.map(p => String(p.id)));
+    let cacheChanged = false;
+    deletedPollIds.value.forEach(id => {
+      if (!serverIds.has(id)) {
+        deletedPollIds.value.delete(id);
+        cacheChanged = true;
       }
-
-      // 過濾掉尚未被後端刪除（但在本地黑名單中）的項目
-      const filteredPolls = pollsArray.filter(poll => !deletedPollIds.value.has(String(poll.id)));
-
-      const processedPolls = filteredPolls.map(poll => {
-        const responses = poll.responses || [];
-        const total = responses.length;
-
-        // 強制根據原始 responses 重新計算統計，確保「每一筆作答都算一票」
-        if (poll.type === 'poll') {
-          const options = poll.options || [];
-          const counts = {};
-          responses.forEach(r => {
-            // 整合所有可能的作答欄位名稱 (text, answer, value, 答案)，並進行正規化處理
-            const val = (r.text || r.answer || r.value || r.答案 || '').toString().trim().toLowerCase();
-            if (val) counts[val] = (counts[val] || 0) + 1;
-          });
-          return {
-            ...poll,
-            responses,
-            votes: options.map(opt => { // 針對選項也進行正規化處理
-              const normalizedOpt = opt.toString().trim().toLowerCase();
-              const c = counts[normalizedOpt] || 0;
-              return { text: opt, count: c, percent: total > 0 ? ((c / total) * 100).toFixed(1) : 0 };
-            })
-          };
-        }
-        return { ...poll, responses };
-      });
-
-      console.log('[Debug] 處理後的統計資料:', processedPolls);
-
-      // 排序：將最新的互動（ID 較大/時間較新者）排在最前面，方便管理不斷增加的題目
-      allPollResults.value = processedPolls.sort((a, b) => {
-        return parseFloat(b.id) - parseFloat(a.id);
-      });
+    });
+    if (cacheChanged) {
+      localStorage.setItem('poll_deleted_ids_cache', JSON.stringify(Array.from(deletedPollIds.value)));
     }
+    
+    // 1. 建立一個 Map，以題目內容為鍵，儲存聚合後的投票結果結構
+    const groupedMap = new Map();
+
+    // 初始化每個題目定義的聚合結構
+    pollDefinitions.forEach(def => {
+      // 基礎過濾：移除本地已刪除的項目
+      if (deletedPollIds.value.has(String(def.id))) return;
+
+      const questionKey = (def.question || "").toString().trim();
+      groupedMap.set(questionKey, {
+        id: def.id,
+        question: questionKey,
+        type: def.type,
+        options: def.options || [], // 保留原始選項，用於多選一投票的計數
+        votes: def.type === 'poll' ? def.options.map(opt => ({ text: opt, count: 0, percent: 0 })) : [],
+        responses: [] // 用於簡答題或收集原始作答
+      });
+    });
+
+    // 2. 處理所有學生的作答紀錄，進行聚合
+    pollSubmissions.forEach(submission => {
+      const questionKey = (submission.questionContent || "").toString().trim();
+      const poll = groupedMap.get(questionKey);
+
+      if (poll) {
+        if (poll.type === 'poll') {
+          const submittedAnswer = String(submission.answer).trim();
+          const optionIndex = poll.options.findIndex(opt => String(opt).trim() === submittedAnswer);
+          if (optionIndex !== -1) {
+            poll.votes[optionIndex].count++;
+          }
+        } else if (poll.type === 'qa') {
+          poll.responses.push({
+            答案: submission.answer || "",
+            姓名: submission.name || "匿名",
+            時間: submission.timestamp || ""
+          });
+        }
+      }
+    });
+
+    // 3. 統計票數與處理顯示資料
+    const processedPolls = Array.from(groupedMap.values()).map(poll => {
+      if (poll.type === 'poll') {
+        // 以題目定義中的選項為基礎，確保 0 票也會顯示
+        const totalVotes = poll.votes.reduce((sum, v) => sum + v.count, 0);
+        
+        poll.votes.forEach(v => {
+          v.percent = totalVotes > 0 ? ((v.count / totalVotes) * 100).toFixed(1) : 0;
+        });
+      }
+      return poll; // QA 題型直接回傳 responses
+    });
+
+    // 排序：將最新的互動（ID 較大/時間較新者）排在最前面，方便管理不斷增加的題目
+    allPollResults.value = processedPolls.sort((a, b) => {
+      // 確保 id 是數字或可比較的值
+      const idA = typeof a.id === 'string' ? parseFloat(a.id) : a.id;
+      const idB = typeof b.id === 'string' ? parseFloat(b.id) : b.id;
+      return idB - idA;
+    });
   } catch (error) {
     console.warn('[Poll] 同步投票資料失敗:', error.message);
   }
@@ -761,14 +781,19 @@ const deletePollItem = async (pollId) => {
       })
     });
 
-    if (!res.ok) throw new Error('伺服器刪除失敗');
+    // 解析伺服器回傳的 JSON
+    const result = await res.json();
+    
+    if (!res.ok || result.status !== 'success') {
+      throw new Error(result.message || `伺服器回傳錯誤 (狀態碼: ${res.status})`);
+    }
 
     // 本地立即過濾移除
     allPollResults.value = allPollResults.value.filter(p => p.id !== pollId);
     playSound('success');
   } catch (error) {
     console.error('刪除失敗:', error);
-    alert('刪除失敗，請檢查網路連線或後端設定。');
+    alert(`刪除失敗：${error.message}\n請檢查網路連線，並確認後端 GAS 已部署為「所有人」存取。`);
   }
 };
 
@@ -852,8 +877,10 @@ const deleteResult = async (timestamp) => {
       })
     });
     
-    if (!res.ok) {
-      throw new Error(`刪除失敗，伺服器回傳: ${res.status}`);
+    const result = await res.json();
+    
+    if (!res.ok || result.status !== 'success') {
+      throw new Error(result.message || `刪除失敗，伺服器回傳: ${res.status}`);
     }
 
     // 2. 立即從前端目前的顯示列表中移除
@@ -874,7 +901,7 @@ const getGroupedQaResponses = (responses) => {
   responses.forEach(res => {
     console.log('[Debug] 正在處理單筆作答內容:', res);
     // 整合所有可能的作答欄位名稱 (text, answer, value, 答案)
-    const val = (res.text || res.answer || res.value || res.答案 || '').toString().trim();
+    const val = (res.答案 || res.text || res.answer || res.value || '').toString().trim();
     if (!val) return;
     const key = val;
     if (grouped[key]) {
@@ -927,10 +954,8 @@ onUnmounted(() => {
     <!-- Header Section -->
     <header class="header">
       <div class="header-left">
-        <a href="https://www.et.tku.edu.tw/" target="_blank" class="nav-button">
-          <ruby v-if="showZhuyin">淡江教科系<rt>ㄉㄢˋ ㄐㄧㄤ ㄐㄧㄠˋ ㄎㄜ ㄒㄧˋ</rt></ruby>
-          <span v-else>淡江教科系</span>
-        </a>
+        <img src="/0430.png" alt="Logo" class="site-logo" />
+        <span class="site-title">課堂小助手</span>
       </div>
       <div class="header-center">
         <nav class="tab-nav">
@@ -1068,16 +1093,25 @@ onUnmounted(() => {
 
     <main class="container" v-else-if="activeTab === 'poll'">
       <div class="dashboard-card text-center mb-2">
-        <h2>📊 課堂反饋與投票系統</h2>
+        <h2>
+          <ruby v-if="showZhuyin">📊 課堂反饋與投票系統<rt>📊 ㄎㄜˋ ㄊㄤˊ ㄈㄢˇ ㄎㄨㄟˋ ㄩˇ ㄊㄡˊ ㄆㄧㄠˋ ㄒㄧˋ ㄊㄨㄥˇ</rt></ruby>
+          <span v-else>📊 課堂反饋與投票系統</span>
+        </h2>
         <p class="tool-desc">發起即時互動，目前共有 <span class="highlight">{{ allPollResults.length }}</span> 個活動記錄。</p>
       </div>
 
       <div class="info-section">
         <!-- 投票編輯器 -->
         <div class="input-card">
-          <h3>新增互動題目</h3>
+          <h3>
+            <ruby v-if="showZhuyin">新增互動題目<rt>ㄒㄧㄣ ㄗㄥ ㄏㄨˋ ㄉㄨㄥˋ ㄊㄧˊ ㄇㄨˋ</rt></ruby>
+            <span v-else>新增互動題目</span>
+          </h3>
           <div class="form-group">
-            <label>互動類型：</label>
+            <label>
+              <ruby v-if="showZhuyin">互動類型：<rt>ㄏㄨˋ ㄉㄨㄥˋ ㄌㄟˋ ㄒㄧㄥˊ ：</rt></ruby>
+              <span v-else>互動類型：</span>
+            </label>
             <select v-model="pollForm.type" class="type-select">
               <option value="poll">多選一投票 (單選)</option>
               <option value="qa">開放式簡答</option>
@@ -1085,21 +1119,33 @@ onUnmounted(() => {
           </div>
           <p v-if="pollForm.type === 'qa'" class="tool-desc" style="color: #6610f2; margin-top: -0.5rem;">💡 簡答模式下，學生可自由輸入文字，無需設定標準答案。</p>
           <div class="form-group">
-            <label>問題：</label>
+            <label>
+              <ruby v-if="showZhuyin">問題：<rt>ㄨㄣˋ ㄊㄧˊ ：</rt></ruby>
+              <span v-else>問題：</span>
+            </label>
             <textarea v-model="pollForm.question" placeholder="例如：這題的答案你認為是？" class="q-textarea"></textarea>
           </div>
           
           <div v-if="pollForm.type === 'poll'" class="options-edit">
-            <label>投票選項：</label>
+            <label>
+              <ruby v-if="showZhuyin">投票選項：<rt>ㄊㄡˊ ㄆㄧㄠˋ ㄒㄩㄢˇ ㄒㄧㄤˋ ：</rt></ruby>
+              <span v-else>投票選項：</span>
+            </label>
             <div v-for="(opt, idx) in pollForm.options" :key="idx" class="opt-row">
               <span class="q-num">{{ String.fromCharCode(65 + idx) }}.</span>
               <input v-model="pollForm.options[idx]" placeholder="選項內容" class="opt-input">
               <button @click="removePollOption(idx)" class="delete-btn-sm">✕</button>
             </div>
-            <button @click="addPollOption" class="add-opt-btn" style="margin-bottom: 1rem;">+ 新增選項</button>
+            <button @click="addPollOption" class="add-opt-btn" style="margin-bottom: 1rem;">
+              <ruby v-if="showZhuyin">+ 新增選項<rt>ㄒㄧㄣ ㄗㄥ ㄒㄩㄢˇ ㄒㄧㄤˋ</rt></ruby>
+              <span v-else>+ 新增選項</span>
+            </button>
           </div>
 
-          <button @click="addPollToQueue" class="add-btn w-full">➕ 加入發佈列表</button>
+          <button @click="addPollToQueue" class="add-btn w-full">
+            <ruby v-if="showZhuyin">➕ 加入發佈列表<rt>ㄐㄧㄚ ㄖㄨˋ ㄈㄚ ㄅㄨˋ ㄌㄧㄝˋ ㄅㄧㄠˇ</rt></ruby>
+            <span v-else>➕ 加入發佈列表</span>
+          </button>
 
           <!-- 待發佈題目預覽 -->
           <div v-if="pollQuestions.length > 0" class="mt-2" style="border-top: 1px solid #eee; padding-top: 1rem;">
@@ -1112,15 +1158,27 @@ onUnmounted(() => {
 
           <div class="button-group-vertical">
             <button @click="publishPoll" class="publish-btn action-btn w-full" :disabled="isPollPublishing">
-              {{ isPollPublishing ? '發佈中...' : '🚀 一次發佈所有題目' }}
+              <template v-if="showZhuyin">
+                <ruby v-if="isPollPublishing">發佈中...<rt>ㄈㄚ ㄅㄨˋ ㄓㄨㄥ</rt></ruby>
+                <ruby v-else>🚀 一次發佈所有題目<rt>🚀 ㄧ ㄘˋ ㄈㄚ ㄅㄨˋ ㄙㄨㄛˇ ㄧㄡˇ ㄊㄧˊ ㄇㄨˋ</rt></ruby>
+              </template>
+              <template v-else>
+                {{ isPollPublishing ? '發佈中...' : '🚀 一次發佈所有題目' }}
+              </template>
             </button>
-            <button @click="clearPoll" class="delete-btn w-full">清空當前資料</button>
+            <button @click="clearPoll" class="delete-btn w-full">
+              <ruby v-if="showZhuyin">清空當前資料<rt>ㄑㄧㄥ ㄎㄨㄥ ㄉㄤ ㄑㄧㄢˊ ㄗ ㄌㄧㄠˋ</rt></ruby>
+              <span v-else>清空當前資料</span>
+            </button>
           </div>
         </div>
 
         <!-- 即時統計結果 -->
         <div class="display-card">
-          <h3>📈 投票統計結果</h3>
+          <h3>
+            <ruby v-if="showZhuyin">📈 投票統計結果<rt>📈 ㄊㄡˊ ㄆㄧㄠˋ ㄊㄨㄥˇ ㄐㄧˋ ㄐㄧㄝˊ ㄍㄨㄛˇ</rt></ruby>
+            <span v-else>📈 投票統計結果</span>
+          </h3>
           <div v-if="allPollResults.length === 0 || allPollResults.every(p => p.type !== 'poll')" class="empty-msg">尚未發佈投票或目前無統計資料...</div>
           <div v-for="poll in allPollResults.filter(p => p.type === 'poll')" :key="poll.id" class="poll-result-item mb-2">
             <div class="q-header">
@@ -1154,7 +1212,10 @@ onUnmounted(() => {
       
       <div class="list-section">
         <div class="list-card">
-          <h3>💬 開放式回答回饋</h3>
+          <h3>
+            <ruby v-if="showZhuyin">💬 開放式回答回饋<rt>💬 ㄎㄞ ㄈㄤˋ ㄕˋ ㄏㄨㄟˊ ㄉㄚˊ ㄏㄨㄟˊ ㄎㄨㄟˋ</rt></ruby>
+            <span v-else>💬 開放式回答回饋</span>
+          </h3>
           <div v-if="allPollResults.filter(p => p.type === 'qa').length === 0" class="empty-msg">目前尚無簡答回饋資料。</div>
           <div v-for="poll in allPollResults.filter(p => p.type === 'qa')" :key="poll.id" class="mb-2">
             <div class="q-header">
@@ -1500,6 +1561,35 @@ onUnmounted(() => {
   border-bottom-color: rgba(255,255,255,0.1);
 }
 
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.site-logo {
+  height: 60px;
+  width: auto;
+  object-fit: contain;
+}
+
+.site-title {
+  font-size: 1.8rem; /* 調整字體大小以符合圖片視覺效果 */
+  font-weight: bold; /* 加粗字體 */
+  color: #34495e; /* 選擇一個與圖片顏色相近的深色 */
+  white-space: nowrap; /* 防止文字換行 */
+}
+
+.dark-mode .site-title {
+  color: #ecf0f1; /* 暗黑模式下的文字顏色 */
+}
+
+@media (max-width: 768px) {
+  .site-logo {
+    height: 45px; /* 在手機版上縮小 */
+  }
+}
+
 .tab-nav {
   display: flex;
   gap: 0.8rem;
@@ -1549,9 +1639,9 @@ onUnmounted(() => {
 .nav-button:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3); }
 
 .container {
-  max-width: 1000px;
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 2rem 1.5rem;
 }
 
 .button-group {
@@ -2197,7 +2287,7 @@ onUnmounted(() => {
     font-size: 0.95rem;
   }
   .container {
-    padding: 1.5rem;
+    padding: 1.5rem 1rem;
   }
   .button-group, .info-section, .tools-grid {
     grid-template-columns: 1fr; /* Stack elements on smaller screens */
@@ -2225,7 +2315,7 @@ onUnmounted(() => {
   }
   .nav-button { font-size: 0.9rem; padding: 0.5rem 1rem; }
   .container {
-    padding: 1rem;
+    padding: 1rem 0.8rem;
   }
   h2 { font-size: 1.5rem; }
   h3 { font-size: 1.2rem; }
