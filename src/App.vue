@@ -8,11 +8,12 @@ const vFocusAuto = {
 
 // --- State Management ---
 const isDarkMode = ref(false);
-const activeTab = ref('exam'); // 'exam', 'quiz', 'poll', or 'tools'
+const activeTab = ref('home'); // 'home', 'exam', 'quiz', 'poll', or 'tools'
 const showZhuyin = ref(false);
 const isCountdownMode = ref(false);
 const isFullScreenTimer = ref(false);
 const isExamFlashing = ref(false);
+const showQrCodeModal = ref(false); // 新增：控制 QR Code 彈出視窗顯示
 const isExamWarning = ref(false);
 
 // Form Data
@@ -967,6 +968,9 @@ onMounted(() => {
   fetchStudentResults(); // 初始載入立即獲取成績，不用等 5 秒
   startSync();
   fetchPollStatus(); // 頁面載入後立即同步一次，不要等 3 秒
+  // 確保在組件掛載時，如果 QR Code 彈窗是開啟的，則禁用滾動
+  document.body.style.overflow = showQrCodeModal.value ? 'hidden' : '';
+
   setInterval(fetchPollStatus, 3000); // 投票每 3 秒同步一次
 });
 
@@ -975,15 +979,41 @@ onUnmounted(() => {
   clearInterval(presentationInterval);
   if (syncInterval) clearInterval(syncInterval);
   if (bgAudio) bgAudio.pause();
+  document.body.style.overflow = ''; // 確保組件卸載時恢復滾動
+});
+
+// 監聽 showQrCodeModal 變化，控制 body 滾動
+watch(showQrCodeModal, (newVal) => {
+  document.body.style.overflow = newVal ? 'hidden' : '';
+  if (newVal) playSound('click'); // 開啟時播放音效
 });
 </script>
 
 <template>
   <div :class="['app-wrapper transition-all duration-500', isDarkMode ? 'dark-mode' : 'light-mode']">
     
+    <!-- 首頁登入畫面 -->
+    <div v-if="activeTab === 'home'" class="landing-container">
+      <div class="landing-bg-circles">
+        <div class="circle circle-1"></div>
+        <div class="circle circle-2"></div>
+      </div>
+      <div class="landing-content">
+        <div class="logo-wrapper">
+          <img src="/0430.png" alt="Logo" class="landing-logo" />
+        </div>
+        <h1 class="landing-title">智慧課堂小助手</h1>
+        <p class="landing-subtitle">全方位教學互動平台，讓學習更有趣、效率更提升</p>
+        <button @click="activeTab = 'exam'; playSound('click')" class="enter-btn">
+          進入系統
+        </button>
+      </div>
+    </div>
+
+    <template v-else>
     <!-- Header Section -->
     <header class="header">
-      <div class="header-left">
+      <div class="header-left" @click="activeTab = 'home'; playSound('click')">
         <img src="/0430.png" alt="Logo" class="site-logo" />
         <span class="site-title">課堂小助手</span>
       </div>
@@ -1289,6 +1319,9 @@ onUnmounted(() => {
             {{ isPublishing ? '同步中...' : '🚀 發佈到學生端' }}
           </button>
           <a :href="studentSiteUrl" target="_blank" class="student-link-btn">開啟學生端 🔗</a>
+          <button @click="showQrCodeModal = true" class="student-link-btn">
+            學生端 QRCODE
+          </button>
         </div>
       </div>
 
@@ -1552,10 +1585,190 @@ onUnmounted(() => {
         </div>
       </div>
     </transition>
+    </template>
+
+    <!-- QR Code 彈出視窗 -->
+    <transition name="fade">
+      <div v-if="showQrCodeModal" class="qr-modal-overlay" @click.self="showQrCodeModal = false">
+        <div class="qr-modal-content">
+          <button class="qr-modal-close-btn" @click="showQrCodeModal = false">✕</button>
+          <h3 class="qr-modal-title">掃描 QR Code 進入學生端</h3>
+          <img src="/0430-2.png" alt="Student Site QR Code" class="qr-code-image" />
+          <p class="qr-modal-description">請學生使用手機掃描上方 QR Code 即可進入測驗頁面。</p>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
 <style scoped>
+.landing-container {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+}
+
+.dark-mode .landing-container {
+  background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
+}
+
+/* 背景裝飾圓圈 */
+.landing-bg-circles .circle {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  z-index: 0;
+  opacity: 0.4;
+}
+
+.circle-1 {
+  width: 400px;
+  height: 400px;
+  background: #4f46e5;
+  top: -100px;
+  right: -100px;
+  animation: float 10s infinite alternate;
+}
+
+.circle-2 {
+  width: 300px;
+  height: 300px;
+  background: #8b5cf6;
+  bottom: -50px;
+  left: -50px;
+  animation: float 8s infinite alternate-reverse;
+}
+
+.landing-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 800px;
+  padding: 2rem;
+  animation: fadeIn 0.8s ease-out;
+}
+
+.logo-wrapper {
+  margin-bottom: 1rem;
+  transition: transform 0.3s ease;
+}
+
+.logo-wrapper:hover {
+  transform: scale(1.05);
+}
+
+.landing-logo {
+  height: 120px;
+  width: auto;
+  filter: drop-shadow(0 10px 15px rgba(0,0,0,0.1));
+}
+
+.landing-title {
+  font-size: 3.5rem;
+  font-weight: 800;
+  margin: 1rem 0 1.5rem;
+  line-height: 1.3;
+  padding: 0.5rem 0;
+  background: linear-gradient(90deg, #4f46e5, #8b5cf6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -1px;
+}
+
+.landing-subtitle {
+  font-size: 1.4rem;
+  color: #64748b;
+  margin-bottom: 2.5rem;
+  font-weight: 500;
+}
+
+.dark-mode .landing-subtitle {
+  color: #94a3b8;
+}
+
+.image-wrapper {
+  margin-bottom: 3rem;
+  perspective: 1000px;
+}
+
+.landing-image {
+  max-width: 90%;
+  max-height: 35vh;
+  border-radius: 24px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  animation: floatImage 6s ease-in-out infinite;
+  border: 8px solid rgba(255, 255, 255, 0.8);
+}
+
+.dark-mode .landing-image {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+@keyframes floatImage {
+  0%, 100% { transform: translateY(0) rotateX(0); }
+  50% { transform: translateY(-20px) rotateX(2deg); }
+}
+
+@keyframes float {
+  0% { transform: translate(0, 0); }
+  100% { transform: translate(30px, 30px); }
+}
+
+.enter-btn {
+  padding: 1.2rem 4rem;
+  font-size: 1.8rem;
+  background: #4f46e5;
+  background: linear-gradient(90deg, #4f46e5 0%, #8b5cf6 50%, #4f46e5 100%);
+  background-size: 200% 100%;
+  color: white;
+  border: none;
+  border-radius: 50px;
+  cursor: pointer;
+  font-weight: bold;
+  box-shadow: 0 10px 25px rgba(79, 70, 229, 0.3);
+  transition: all 0.3s ease;
+  transition: all 0.4s ease, background-position 0.6s ease;
+  position: relative; /* 為偽元素定位 */
+  overflow: hidden; /* 隱藏超出按鈕範圍的掃光 */
+}
+
+.enter-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -75%; /* 初始位置在按鈕左側外部 */
+  width: 50%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.3); /* 掃光顏色 */
+  transform: skewX(-20deg); /* 傾斜效果 */
+  transition: transform 0.6s ease-in-out; /* 掃光動畫 */
+  z-index: 1;
+}
+
+.enter-btn:hover {
+  /* 掃光效果 */
+  transform: translateY(-5px) scale(1.05);
+  background: #4338ca;
+  box-shadow: 0 15px 30px rgba(79, 70, 229, 0.4);
+}
+
+.enter-btn:hover::before {
+  transform: translateX(200%) skewX(-20deg); /* 掃光從左到右移動 */
+  background-position: -100% 0; /* 懸停時移動背景位置 */
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .app-wrapper {
   min-height: 100vh;
   font-family: 'Inter', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
@@ -1599,6 +1812,7 @@ onUnmounted(() => {
 .header-left {
   display: flex;
   align-items: center;
+  cursor: pointer; /* Add this to indicate it's clickable */
   gap: 12px;
 }
 
@@ -2519,7 +2733,22 @@ onUnmounted(() => {
 .publish-btn { background-color: #6610f2; color: white; border: none; }
 .dark-mode .publish-btn { background-color: #8b5cf6; }
 .publish-btn:hover { background-color: #520dc2; }
-.student-link-btn { font-size: 0.8rem; color: #007bff; text-decoration: none; padding: 0.5rem; border: 1px solid #007bff; border-radius: 8px; }
+.student-link-btn {
+  font-size: 0.8rem;
+  color: #007bff;
+  text-decoration: none;
+  padding: 0.5rem;
+  border: 1px solid #007bff;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.student-link-btn:hover {
+  background: rgba(0, 123, 255, 0.05);
+  border-color: #0056b3;
+  color: #0056b3;
+}
 .student-results-card { border-top: 4px solid #6610f2; }
 .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
 .card-header h3 {
@@ -2597,4 +2826,78 @@ onUnmounted(() => {
   padding-bottom: 0.5rem;
 }
 .dark-mode .q-header { border-bottom-color: rgba(74, 85, 104, 0.5); }
+
+/* QR Code Modal Styles */
+.qr-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.6); /* 半透明黑色背景 */
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(5px); /* 模糊背景 */
+}
+
+.qr-modal-content {
+  background: white;
+  padding: 2.5rem;
+  border-radius: 20px;
+  box-shadow: 0 15px 30px rgba(0, 0, 0, 0.2);
+  position: relative;
+  max-width: 90%;
+  max-height: 90%;
+  overflow: auto;
+  text-align: center;
+  animation: zoomIn 0.3s ease-out; /* 彈窗進入動畫 */
+}
+
+.dark-mode .qr-modal-content {
+  background: #2d3748;
+  color: #e2e8f0;
+}
+
+.qr-modal-close-btn {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: none;
+  border: none;
+  font-size: 1.8rem;
+  cursor: pointer;
+  color: #666;
+  transition: color 0.2s;
+}
+.dark-mode .qr-modal-close-btn { color: #ccc; }
+.qr-modal-close-btn:hover { color: #dc3545; }
+
+.qr-modal-title {
+  font-size: 1.8rem;
+  margin-bottom: 1.5rem;
+  color: #4f46e5;
+}
+.dark-mode .qr-modal-title { color: #8b5cf6; }
+
+.qr-code-image {
+  max-width: 300px; /* 限制圖片大小 */
+  height: auto;
+  border: 5px solid #f0f0f0; /* 圖片邊框 */
+  border-radius: 10px;
+  margin-bottom: 1.5rem;
+}
+.dark-mode .qr-code-image { border-color: #4a5568; }
+
+.qr-modal-description {
+  font-size: 1rem;
+  color: #666;
+}
+.dark-mode .qr-modal-description { color: #a0aec0; }
+
+@keyframes zoomIn {
+  from { transform: scale(0.8); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
 </style>
