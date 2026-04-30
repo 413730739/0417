@@ -84,6 +84,32 @@ watch(deletedPollIds, (newVal) => {
   localStorage.setItem('poll_deleted_ids_cache', JSON.stringify(Array.from(newVal)));
 }, { deep: true });
 
+// 監聽考試時間輸入，強制限制範圍 (小時 0-24, 分鐘 0-60)
+watch(examStartHour, (val) => {
+  if (val === '') return;
+  const n = parseInt(val);
+  if (n < 0) examStartHour.value = '00';
+  else if (n > 24) examStartHour.value = '24';
+});
+watch(examStartMinute, (val) => {
+  if (val === '') return;
+  const n = parseInt(val);
+  if (n < 0) examStartMinute.value = '00';
+  else if (n > 60) examStartMinute.value = '60';
+});
+watch(examEndHour, (val) => {
+  if (val === '') return;
+  const n = parseInt(val);
+  if (n < 0) examEndHour.value = '00';
+  else if (n > 24) examEndHour.value = '24';
+});
+watch(examEndMinute, (val) => {
+  if (val === '') return;
+  const n = parseInt(val);
+  if (n < 0) examEndMinute.value = '00';
+  else if (n > 60) examEndMinute.value = '60';
+});
+
 const getPollTotal = (poll) => {
   if (poll.type === 'poll' && poll.votes) {
     return poll.votes.reduce((sum, item) => sum + item.count, 0);
@@ -1015,17 +1041,17 @@ onUnmounted(() => {
           <div class="form-group">
             <label><ruby v-if="showZhuyin">考試開始時間<rt>ㄎㄠˇ ㄕˋ ㄎㄞ ㄕˇ ㄕˊ ㄐㄧㄢ</rt></ruby><span v-else>考試開始時間</span></label>
             <div class="time-input-group">
-              <input v-model="examStartHour" type="number" min="0" max="23" placeholder="時" class="time-input" />
+              <input v-model="examStartHour" type="number" min="0" max="24" placeholder="時" class="time-input" />
               <span class="time-separator">:</span>
-              <input v-model="examStartMinute" type="number" min="0" max="59" placeholder="分" class="time-input" />
+              <input v-model="examStartMinute" type="number" min="0" max="60" placeholder="分" class="time-input" />
             </div>
           </div>
           <div class="form-group">
             <label><ruby v-if="showZhuyin">考試結束時間<rt>ㄎㄠˇ ㄕˋ ㄐㄧㄝˊ ㄕㄨ ㄕˊ ㄐㄧㄢ</rt></ruby><span v-else>考試結束時間</span></label>
             <div class="time-input-group">
-              <input v-model="examEndHour" type="number" min="0" max="23" placeholder="時" class="time-input" />
+              <input v-model="examEndHour" type="number" min="0" max="24" placeholder="時" class="time-input" />
               <span class="time-separator">:</span>
-              <input v-model="examEndMinute" type="number" min="0" max="59" placeholder="分" class="time-input" />
+              <input v-model="examEndMinute" type="number" min="0" max="60" placeholder="分" class="time-input" />
             </div>
           </div>
           <div class="form-group">
@@ -1412,45 +1438,6 @@ onUnmounted(() => {
           </div>
         </section>
 
-        <!-- Scoreboard -->
-        <section class="tool-card">
-          <h3><ruby v-if="showZhuyin">小組競賽記分板<rt>ㄒㄧㄠˇ ㄗㄨˇ ㄐㄧㄥˋ ㄙㄞˋ ㄐㄧˋ ㄈㄣ ㄅㄢˇ</rt></ruby><span v-else>小組競賽記分板</span></h3>
-          <div class="score-controls">
-            <button @click="addGroup" class="tool-btn-sm">+ 新增小組</button>
-            <button @click="resetScores" class="tool-btn-sm reset-btn">重設分數</button>
-          </div>
-          <transition-group name="list" tag="div" class="score-list">
-            <div v-for="(group, idx) in groups" :key="idx" class="score-item">
-              <div class="score-main">
-                <input 
-                  v-if="group.isEditing" 
-                  v-model="group.name" 
-                  class="group-name-input" 
-                  @blur="group.isEditing = false"
-                  @keyup.enter="group.isEditing = false"
-                  v-focus-auto
-                />
-                <span 
-                  v-else 
-                  class="group-name-display" 
-                  @click="group.isEditing = true"
-                >
-                  {{ group.name }}
-                </span>
-                <span class="score-val" :class="{ 'score-jump': group.scoreAnimation }">{{ group.score }}</span>
-              </div>
-              <div class="score-actions">
-                <button @click="updateScore(idx, -1)" class="btn-sub">-1</button>
-                <button @click="updateScore(idx, 1)" class="btn-add">+1</button>
-                <button @click="updateScore(idx, 5)" class="btn-add-lg">+5</button>
-              </div>
-            </div>
-          </transition-group>
-          <div class="ranking-preview">
-            <strong>目前領先：</strong> {{ sortedGroups[0]?.name }} ({{ sortedGroups[0]?.score }})
-          </div>
-        </section>
-
         <!-- Presentation Timer -->
         <section class="tool-card">
           <h3><ruby v-if="showZhuyin">小組報告計時器<rt>ㄒㄧㄠˇ ㄗㄨˇ ㄅㄠˋ ㄍㄠˋ ㄐㄧˋ ㄕˊ ㄑㄧˋ</rt></ruby><span v-else>小組報告計時器</span></h3>
@@ -1480,6 +1467,50 @@ onUnmounted(() => {
             <button @click="toggleMusic('exam')" :class="['music-btn', { 'active': activeMusic === 'exam' }]">🔔 考試鐘聲</button>
           </div>
         </section>
+      </div>
+
+      <!-- Scoreboard Section (Moved and Expanded) -->
+      <div class="ranking-section" style="margin-top: 2rem; margin-bottom: 2.5rem;">
+        <div class="list-card">
+          <div class="card-header">
+            <h3><ruby v-if="showZhuyin">小組競賽計分板<rt>ㄒㄧㄠˇ ㄗㄨˇ ㄐㄧㄥˋ ㄙㄞˋ ㄐㄧˋ ㄈㄣ ㄅㄢˇ</rt></ruby><span v-else>小組競賽記分板</span></h3>
+            <div class="score-controls">
+              <button @click="addGroup" class="tool-btn-sm">+ 新增小組</button>
+              <button @click="resetScores" class="tool-btn-sm reset-btn">重設分數</button>
+            </div>
+          </div>
+          <transition-group name="list" tag="div" class="score-list">
+            <div v-for="(group, idx) in groups" :key="idx" class="score-item rank-card">
+              <div class="score-main" style="display: flex; align-items: center; flex: 1; gap: 1.5rem; margin-right: 3rem;">
+                <input 
+                  v-if="group.isEditing" 
+                  v-model="group.name" 
+                  class="group-name-input" 
+                  @blur="group.isEditing = false"
+                  @keyup.enter="group.isEditing = false"
+                  v-focus-auto
+                />
+                <span 
+                  v-else 
+                  class="rank-name" 
+                  @click="group.isEditing = true"
+                  style="cursor: pointer;"
+                >
+                  {{ group.name }} ✎
+                </span>
+                <div class="rank-score-pill">
+                  <span class="score-num" :class="{ 'score-jump': group.scoreAnimation }">{{ group.score }}</span>
+                  <span class="unit">pts</span>
+                </div>
+              </div>
+              <div class="score-actions">
+                <button @click="updateScore(idx, -1)" class="btn-sub">-1</button>
+                <button @click="updateScore(idx, 1)" class="btn-add">+1</button>
+                <button @click="updateScore(idx, 5)" class="btn-add-lg">+5</button>
+              </div>
+            </div>
+          </transition-group>
+        </div>
       </div>
 
       <!-- Real-time Ranking Table -->
@@ -1523,24 +1554,24 @@ onUnmounted(() => {
 <style scoped>
 .app-wrapper {
   min-height: 100vh;
-  font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  font-family: 'Inter', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
   transition: background-color 0.4s ease, color 0.4s ease;
 }
 
 .light-mode {
-  background-color: #ffffff;
-  color: #000000;
+  background-color: #f8fafc;
+  color: #1e293b;
 }
 
 .dark-mode {
-  background-color: #000000;
-  color: #ffffff;
+  background-color: #1a202c;
+  color: #f1f5f9;
 }
 /* 確保所有標題在暗黑模式下都是白色 */
 .dark-mode h1,
 .dark-mode h2,
 .dark-mode h3 {
-  color: #ffffff;
+  color: #f8fafc;
 }
 
 .header {
@@ -1548,17 +1579,17 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem 2rem;
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(10px);
   position: sticky;
   top: 0;
   z-index: 100;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  border-bottom: 1px solid rgba(0,0,0,0.05);
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
 }
 .dark-mode .header {
-  background: rgba(30, 30, 30, 0.8);
-  border-bottom-color: rgba(255,255,255,0.1);
+  background: rgba(26, 32, 44, 0.9);
+  border-bottom: 1px solid rgba(74, 85, 104, 0.3);
 }
 
 .header-left {
@@ -1602,22 +1633,22 @@ onUnmounted(() => {
   font-size: 1.1rem;
   font-weight: 600;
   cursor: pointer;
-  color: #adb5bd;
+  color: #64748b;
   transition: all 0.3s ease;
 }
 .tab-nav button.active {
-  color: #007bff;
+  color: #4f46e5;
   position: relative;
 }
 .tab-nav button.active::after {
   content: '';
   position: absolute;
-  bottom: -5px;
+  bottom: -2px;
   left: 20%;
   width: 60%;
-  height: 4px;
-  background: #007bff;
-  border-radius: 2px;
+  height: 3px;
+  background: #4f46e5;
+  border-radius: 99px;
 }
 
 .header-left, .header-right { flex: 1; }
@@ -1654,20 +1685,21 @@ onUnmounted(() => {
 .tool-btn {
   padding: 0.6rem 1rem;
   cursor: pointer;
-  border: 2px solid #007bff;
+  border: 1px solid #e2e8f0;
   background: white;
-  color: #007bff;
+  color: #475569;
   border-radius: 12px;
-  transition: all 0.2s ease; /* Keep transition for hover effects */
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   font-weight: 600;
-  box-shadow: 0 2px 8px rgba(0, 123, 255, 0.1); /* Adjusted shadow */
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
-.dark-mode .tool-btn { background: #1e1e1e; border-color: #007bff; color: #4da3ff; }
+.dark-mode .tool-btn { background: #2d3748; border-color: #4a5568; color: #e2e8f0; }
 .tool-btn:hover { 
-  background: #007bff; 
-  color: white; 
-  transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.2); /* Adjusted shadow */
+  background: #f1f5f9;
+  border-color: #4f46e5;
+  color: #4f46e5;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .tool-btn-sm {
@@ -1680,35 +1712,29 @@ onUnmounted(() => {
   transition: all 0.2s ease; /* Keep transition for hover effects */
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08); /* Keep shadow */
 }
-.dark-mode .tool-btn-sm { background: #2c2c2c; border-color: #444; color: #eee; }
+.dark-mode .tool-btn-sm { background: #374151; border-color: #4b5563; color: #f3f4f6; }
 .tool-btn-sm:hover { border-color: #007bff; color: #007bff; transform: scale(1.05); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); } /* Keep hover effects */
 
 .time-display {
   text-align: center;
   margin: 2rem 0;
   padding: 2rem;
-  background: transparent;
+  background: white;
   border-radius: 24px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.05);
-  border: 2px solid #dee2e6;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0,0,0,0.05);
 }
-.dark-mode .time-display { border-color: #333; }
+.dark-mode .time-display { background: #2d3748; border-color: rgba(74, 85, 104, 0.5); }
 
 .time-value { 
-  font-size: 5rem; 
+  font-size: 5.5rem; 
   font-weight: 800; 
   font-family: 'Courier New', monospace;
-  background: linear-gradient(to bottom, #007bff, #0056b3);
-  line-height: 1; /* Ensure text fits within its box */
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: #4f46e5;
+  line-height: 1;
+  letter-spacing: -2px;
 }
-.dark-mode .time-value {
-  background: none; /* 移除漸層背景 */
-  -webkit-background-clip: unset; /* 重置背景裁剪 */
-  -webkit-text-fill-color: #ffffff; /* 設定文字顏色為白色 */
-  color: #ffffff; /* Fallback for non-webkit browsers */
-}
+.dark-mode .time-value { color: #818cf8; }
 
 .info-section {
   display: grid;
@@ -1718,12 +1744,12 @@ onUnmounted(() => {
 .input-card, .display-card { 
   padding: 2rem; 
   background: white;
-  border-radius: 20px; 
-  box-shadow: 0 10px 25px rgba(0,0,0,0.05);
-  border: 1px solid #eee;
+  border-radius: 24px; 
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+  border: 1px solid rgba(0,0,0,0.05);
   color: inherit;
 }
-.dark-mode .input-card, .dark-mode .display-card { background: #000000; border-color: #333; color: #ffffff; } /* 確保文字顏色為白色 */
+.dark-mode .input-card, .dark-mode .display-card { background: #2d3748; border-color: rgba(74, 85, 104, 0.5); color: #e2e8f0; }
 .form-group { margin-bottom: 1rem; }
 
 .form-group label { 
@@ -1736,11 +1762,10 @@ onUnmounted(() => {
   width: 100%; 
   box-sizing: border-box;
   padding: 0.8rem 1rem; 
-  border: 2px solid #dee2e6; 
+  border: 1px solid #e2e8f0; 
   border-radius: 12px; 
   background-color: #fff;
-  color: inherit;
-  font-size: 1rem;
+  color: #1e293b;
   transition: all 0.3s ease;
   max-width: 100%; /* 確保輸入框不會溢出 */
   outline: none;
@@ -1754,7 +1779,7 @@ onUnmounted(() => {
   -moz-appearance: textfield; /* Firefox */
 }
 .form-group input:focus { border-color: #007bff; box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1); }
-.dark-mode .form-group input { background-color: #111; border-color: #333; color: #fff; }
+.dark-mode .form-group input { background-color: #2d3748; border-color: #4a5568; color: #e2e8f0; }
 
 .time-input-group {
   display: flex;
@@ -1784,12 +1809,12 @@ onUnmounted(() => {
   border-radius: 12px;
   cursor: pointer;
   font-weight: 600;
-  margin-top: 1rem;
-  margin-bottom: 1rem;
-  box-shadow: 0 4px 10px rgba(40, 167, 69, 0.15);
+  border-radius: 14px;
+  box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.3);
   transition: all 0.2s ease;
 }
-.add-btn:hover { transform: scale(1.05); box-shadow: 0 6px 15px rgba(40, 167, 69, 0.25); }
+.dark-mode .add-btn { background: linear-gradient(135deg, #6366f1, #4f46e5); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3); }
+.add-btn:hover { transform: translateY(-2px); box-shadow: 0 20px 25px -5px rgba(79, 70, 229, 0.4); }
 .add-btn:active { transform: scale(0.98); }
 
 .list-section { margin-top: 2rem; }
@@ -1811,9 +1836,10 @@ onUnmounted(() => {
   text-align: center;
   border-bottom: 1px solid #eee;
 }
-.dark-mode .exam-table th, .dark-mode .exam-table td { border-color: #333; }
+.dark-mode .exam-table th, .dark-mode .exam-table td { border-color: #4a5568; }
 
 .exam-table tr:hover { background: rgba(0, 123, 255, 0.02); }
+.dark-mode .exam-table tr:hover { background: rgba(74, 85, 104, 0.15); }
 
 .delete-btn {
   /* 確保 delete-btn-sm 的樣式不會被 delete-btn 覆蓋 */
@@ -1830,6 +1856,7 @@ onUnmounted(() => {
   transition: all 0.2s ease;
   box-shadow: 0 2px 8px rgba(220, 53, 69, 0.15);
 }
+.dark-mode .delete-btn { background-color: #ef4444; }
 .delete-btn:hover { background-color: #c82333; transform: scale(1.05); box-shadow: 0 4px 12px rgba(220, 53, 69, 0.25); }
 
 /* 統一所有編輯器輸入框與選單樣式 */
@@ -1851,19 +1878,19 @@ onUnmounted(() => {
   box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
 }
 .dark-mode .type-select, .dark-mode .q-textarea, .dark-mode .opt-input, .dark-mode .explanation-input, .dark-mode .name-textarea {
-  background-color: #111;
-  border-color: #333;
+  background-color: #2d3748;
+  border-color: #4a5568;
+  color: #e2e8f0;
 }
 
 .list-card { 
-  background: transparent;
-  border: 2px solid #eee; 
-  border-radius: 20px; 
+  background: white;
+  border: 1px solid rgba(0,0,0,0.05);
+  border-radius: 24px; 
   padding: 1.5rem; 
-  box-shadow: 0 10px 25px rgba(0,0,0,0.05);
-  color: inherit;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
 }
-.dark-mode .list-card { border-color: #333; background: #000000; color: #ffffff; } /* 確保文字顏色為白色 */
+.dark-mode .list-card { border-color: rgba(74, 85, 104, 0.5); background: #2d3748; color: #e2e8f0; }
 
 /* Transitions */
 .delete-btn-sm {
@@ -1877,6 +1904,7 @@ onUnmounted(() => {
   transition: all 0.3s ease;
   box-shadow: 0 1px 4px rgba(220, 53, 69, 0.1);
 }
+.dark-mode .delete-btn-sm { background-color: #f87171; color: #fff; }
 .delete-btn-sm:hover { transform: scale(1.05); box-shadow: 0 2px 6px rgba(220, 53, 69, 0.15); }
 
 .list-enter-active, .list-leave-active { transition: all 0.5s ease; }
@@ -1932,7 +1960,7 @@ onUnmounted(() => {
   font-size: 0.95rem;
 }
 .group-item:last-child { border-bottom: none; }
-.dark-mode .group-results { background: rgba(255, 255, 255, 0.05); }
+.dark-mode .group-results { background: #374151; border: 1px solid #4a5568; }
 
 @media (max-width: 600px) {
   .group-controls {
@@ -1965,18 +1993,18 @@ onUnmounted(() => {
 }
 
 .quiz-card {
-  background: transparent;
-  border-radius: 20px;
+  background: white;
+  border-radius: 24px;
   padding: 1.5rem;
   margin-bottom: 1.5rem;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.05);
-  border: 2px solid #eee;
+  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+  border: 1px solid rgba(0,0,0,0.05);
   transition: transform 0.3s ease;
   position: relative;
   overflow: hidden;
   color: inherit;
 }
-.dark-mode .quiz-card { background: #000000; border-color: #333; color: #ffffff; } /* 確保文字顏色為白色 */
+.dark-mode .quiz-card { background: #2d3748; border-color: rgba(74, 85, 104, 0.5); color: #e2e8f0; }
 
 .q-header {
   display: flex;
@@ -2016,13 +2044,13 @@ onUnmounted(() => {
   transition: all 0.2s ease;
   font-weight: 500;
 }
-.dark-mode .opt-label { border-color: #2c2c2c; }
+.dark-mode .opt-label { border-color: #4a5568; background-color: #2d3748; color: #e2e8f0; }
 
 .opt-label:hover:not(.is-disabled) {
   background: #f8f9fa;
   border-color: #dee2e6;
 }
-.dark-mode .opt-label:hover:not(.is-disabled) { background: #252525; }
+.dark-mode .opt-label:hover:not(.is-disabled) { background: #3f4a59; border-color: #5a6b7f; }
 
 .opt-label input { margin-right: 12px; transform: scale(1.2); }
 
@@ -2068,7 +2096,7 @@ onUnmounted(() => {
   border: 2px solid #007bff;
   color: inherit;
 }
-.dark-mode .editor-card { background: #000000; color: #ffffff; } /* 確保文字顏色為白色 */
+.dark-mode .editor-card { background: #2d3748; color: #e2e8f0; border-color: #007bff; }
 
 .q-textarea { height: 100px; margin-top: 0.5rem; resize: vertical; }
 
@@ -2094,8 +2122,7 @@ onUnmounted(() => {
   border: 2px solid #eee;
   box-shadow: 0 10px 25px rgba(0,0,0,0.05);
   color: inherit;
-}
-.dark-mode .tool-card { background: #000000; border-color: #333; color: #ffffff; } /* 確保文字顏色為白色 */
+}.dark-mode .tool-card { background: #2d3748; border-color: #4a5568; color: #e2e8f0; }
 
 .name-textarea { height: 120px; margin: 1rem 0; resize: vertical; }
 
@@ -2115,46 +2142,27 @@ onUnmounted(() => {
 }
 
 .score-list {
-  max-height: 300px;
-  overflow-y: auto;
-  margin: 1rem 0;
-}
-
-.score-item {
   display: flex;
-  gap: 1.2rem;
-  margin-bottom: 1.2rem; /* 加大每組之間的垂直間距 */
-  padding: 0.8rem; /* Add some padding to score item for better visual */
-  border: 1px solid #eee; /* Add a subtle border */
-  border-radius: 12px; /* Match other elements */
-  background: white;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-}
-.dark-mode .score-item {
-  background: #1a1a1a;
-  border-color: #333;
+  flex-direction: column;
+  margin: 1rem 0;
 }
 
 .score-controls {
   display: flex;
-  gap: 1.5rem;
-  margin: 1.5rem 0;
+  gap: 0.8rem;
   flex-wrap: wrap;
-  row-gap: 0.8rem;
 }
 
 .score-main {
   display: flex;
-  align-items: baseline; /* 讓文字基線對齊 */
+  align-items: center;
   gap: 0.8rem;
-  flex: 1; /* 佔據可用空間 */
-  justify-content: space-between; /* 將名稱推到左邊，分數推到右邊 */
+  flex: 1;
 }
 
 .score-val {
   font-size: 1.8rem; /* 讓分數更顯眼 */
   font-weight: 900;
-  color: #3b82f6; /* 使用主色調藍色 */
   min-width: 50px; /* 確保分數顯示區域不會過度縮小 */
   text-align: right;
   transition: transform 0.3s ease-out, color 0.3s ease-out; /* 平滑過渡 */
@@ -2192,7 +2200,6 @@ onUnmounted(() => {
   border: 2px solid transparent;
   border-radius: 8px;
   cursor: pointer;
-  color: inherit;
   transition: all 0.3s ease;
   max-width: 100%; /* 確保輸入框不會溢出 */
   font-weight: 600;
@@ -2201,12 +2208,7 @@ onUnmounted(() => {
   background: rgba(0, 123, 255, 0.05);
   border-color: rgba(0, 123, 255, 0.1);
 }
-.group-name-display::after {
-  content: ' ✎';
-  font-size: 0.8rem;
-  opacity: 0.3;
-}
-.dark-mode .group-name-input { background: #111; border-color: #333; }
+.dark-mode .group-name-input { background: #2d3748; border-color: #4a5568; color: #e2e8f0; }
 
 .action-btn {
   padding: 0.8rem 1.5rem;
@@ -2219,12 +2221,14 @@ onUnmounted(() => {
   transition: all 0.2s ease;
   box-shadow: 0 4px 8px rgba(0, 123, 255, 0.15); /* 統一陰影 */
 }
+.dark-mode .action-btn { background-color: #3b82f6; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3); }
 .action-btn:hover { transform: scale(1.05); box-shadow: 0 6px 15px rgba(0, 123, 255, 0.25); } /* 統一懸停效果 */
 .action-btn:disabled { background: #ccc; transform: none; box-shadow: none; cursor: not-allowed; }
 
 .score-actions {
   display: flex;
-  gap: 1.2rem; /* 拉開 -1, +1, +5 按鈕的間距 */
+  gap: 0.6rem;
+  flex-shrink: 0;
 }
 .score-actions button {
   padding: 0.35rem 0.7rem;
@@ -2343,7 +2347,7 @@ onUnmounted(() => {
   justify-content: center;
   transition: background-color 0.3s;
 }
-.fs-timer-overlay.dark { background: #121212; color: white; }
+.fs-timer-overlay.dark { background: #2d3748; color: #e2e8f0; }
 
 .fs-close-btn {
   position: absolute;
@@ -2380,7 +2384,7 @@ onUnmounted(() => {
 }
 .fs-start-btn:hover { background: #007bff; color: white; transform: scale(1.05); } /* Keep hover effects */
 .dark .fs-start-btn { border-color: #4da3ff; color: #4da3ff; }
-.dark .fs-start-btn:hover { background: #4da3ff; color: #121212; }
+.dark .fs-start-btn:hover { background: #4da3ff; color: #1e293b; }
 .fs-trigger-btn { background-color: #6c757d; color: white; border: none; padding: 0.35rem 0.7rem; border-radius: 10px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08); transition: all 0.2s ease; }
 .fs-trigger-btn:hover { transform: scale(1.05); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); } /* Keep hover effects */
 
@@ -2398,6 +2402,7 @@ onUnmounted(() => {
   transition: all 0.2s ease;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
+.dark-mode .music-btn { border-color: #4a5568; background-color: #2d3748; color: #e2e8f0; }
 .music-btn.active { background: #007bff; color: white; border-color: #007bff; box-shadow: 0 4px 12px rgba(0, 123, 255, 0.25); }
 .music-btn:hover:not(.active) { transform: scale(1.05); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); }
 .music-btn:nth-child(3) { grid-column: span 2; }
@@ -2412,6 +2417,7 @@ onUnmounted(() => {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); /* 輕微陰影 */
   transition: all 0.2s ease;
 }
+.dark-mode .refresh-btn { border-color: #4a5568; color: #e2e8f0; background: #2d3748; }
 .refresh-btn:hover { transform: scale(1.05); box-shadow: 0 2px 5px rgba(0, 0, 0, 0.12); }
 
 .edit-link, .delete-link {
@@ -2421,6 +2427,8 @@ onUnmounted(() => {
   text-decoration: none; /* 確保不是下劃線 */
   color: inherit; /* 繼承文字顏色 */
 }
+.dark-mode .edit-link { color: #60a5fa; }
+.dark-mode .delete-link { color: #f87171; }
 .edit-link:hover { background: rgba(0, 123, 255, 0.1); transform: scale(1.05); }
 .delete-link:hover { background: rgba(220, 53, 69, 0.1); transform: scale(1.05); }
 
@@ -2445,8 +2453,9 @@ onUnmounted(() => {
 }
 
 .dark-mode .rank-card {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.05);
+  background: #2d3748;
+  border-color: rgba(74, 85, 104, 0.5);
+  color: #e2e8f0;
 }
 
 /* 金牌樣式 (第 1 名) */
@@ -2504,10 +2513,16 @@ onUnmounted(() => {
 .rank-score-pill .unit { font-size: 0.8rem; opacity: 0.6; }
 
 .publish-btn { background-color: #6610f2; color: white; border: none; }
+.dark-mode .publish-btn { background-color: #8b5cf6; }
 .publish-btn:hover { background-color: #520dc2; }
 .student-link-btn { font-size: 0.8rem; color: #007bff; text-decoration: none; padding: 0.5rem; border: 1px solid #007bff; border-radius: 8px; }
 .student-results-card { border-top: 4px solid #6610f2; }
 .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+.card-header h3 {
+  flex: 1;
+  text-align: center;
+  margin: 0;
+}
 .refresh-btn { background: none; border: 1px solid #ddd; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
 
 /* Poll Specific Styles */
@@ -2520,7 +2535,7 @@ onUnmounted(() => {
 .chart-item { margin-bottom: 1.2rem; }
 .chart-label { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 4px; }
 .chart-bar-bg { background: #eee; height: 12px; border-radius: 6px; overflow: hidden; }
-.dark-mode .chart-bar-bg { background: #333; }
+.dark-mode .chart-bar-bg { background: #4a5568; }
 .vote-count {
   color: #6610f2;
   font-family: 'Courier New', monospace;
@@ -2538,7 +2553,7 @@ onUnmounted(() => {
   border-radius: 12px;
   margin-bottom: 0.8rem;
 }
-.dark-mode .qa-bubble { background: rgba(255, 255, 255, 0.05); }
+.dark-mode .qa-bubble { background: #374151; border-color: rgba(74, 85, 104, 0.5); color: #e2e8f0; }
 .student-name { color: #007bff; margin-right: 5px; }
 .w-full { width: 100%; }
 .mt-2 { margin-top: 1rem; }
@@ -2562,7 +2577,7 @@ onUnmounted(() => {
   padding-bottom: 1.5rem; 
   margin-bottom: 1.5rem;
 }
-.dark-mode .poll-result-item { border-bottom-color: #333; }
+.dark-mode .poll-result-item { border-bottom-color: #4a5568; background-color: rgba(45, 55, 72, 0.5); padding: 1rem; border-radius: 8px; }
 
 .q-header {
   display: flex;
@@ -2574,5 +2589,5 @@ onUnmounted(() => {
   border-bottom: 1px solid rgba(128, 128, 128, 0.05);
   padding-bottom: 0.5rem;
 }
-.dark-mode .q-header { border-bottom-color: rgba(255, 255, 255, 0.05); }
+.dark-mode .q-header { border-bottom-color: rgba(74, 85, 104, 0.5); }
 </style>
