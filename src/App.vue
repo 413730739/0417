@@ -2503,18 +2503,55 @@ watch(showQrCodeModal, (newVal) => {
 @media (max-width: 768px) {
   .header {
     padding: 0.75rem 1rem;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.8rem;
+  }
+  .header-left {
+    width: 100%;
+    justify-content: center;
   }
   .tab-nav button {
-    padding: 0.5rem 0.8rem;
-    font-size: 0.95rem;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+  }
+  .tab-nav button {
+    padding: 0.6rem 0.8rem;
+    font-size: 1.1rem;
+    flex: 1 1 auto;
+    text-align: center;
+    min-width: 100px;
   }
   .container {
-    padding: 1.5rem 1rem;
+    padding: 1rem 0.75rem;
   }
   .button-group, .info-section, .tools-grid {
     grid-template-columns: 1fr; /* Stack elements on smaller screens */
   }
-  .time-value { font-size: 4rem; }
+  .time-value { font-size: 4.5rem; }
+
+  /* 響應式表格：轉換為卡片式排列 */
+  .exam-table, .exam-table thead, .exam-table tbody, .exam-table th, .exam-table td, .exam-table tr { 
+    display: block; 
+  }
+  .exam-table thead tr { position: absolute; top: -9999px; left: -9999px; }
+  .exam-table tr { border: 1px solid rgba(0,0,0,0.1); margin-bottom: 1.2rem; border-radius: 16px; padding: 1rem; background: rgba(255,255,255,0.5); box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+  .dark-mode .exam-table tr { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.1); }
+  .exam-table td { border: none; position: relative; padding-left: 45% !important; text-align: right !important; min-height: 2.5rem; display: flex; align-items: center; justify-content: flex-end; }
+  .exam-table td:before { 
+    content: attr(data-label); 
+    position: absolute; 
+    left: 1rem; 
+    width: 40%; 
+    font-weight: bold; 
+    color: #64748b;
+    text-align: left;
+  }
+  .dark-mode .exam-table td:before { color: #94a3b8; }
+
   .quiz-actions-top {
     flex-direction: column;
     gap: 0.8rem;
@@ -2528,23 +2565,21 @@ watch(showQrCodeModal, (newVal) => {
 }
 
 @media (max-width: 600px) {
-  .header {
-    padding: 0.5rem 0.8rem;
-  }
-  .tab-nav button {
-    padding: 0.4rem 0.6rem;
-    font-size: 0.85rem;
-  }
-  .nav-button { font-size: 0.9rem; padding: 0.5rem 1rem; }
-  .container {
-    padding: 1rem 0.8rem;
-  }
-  h2 { font-size: 1.5rem; }
-  h3 { font-size: 1.2rem; }
-  .time-value { font-size: 3rem; }
+  .landing-title { font-size: 2.5rem; }
+  .landing-subtitle { font-size: 1.2rem; }
+  .enter-btn { padding: 1rem 3rem; font-size: 1.6rem; }
+
+  .tab-nav button { font-size: 1.1rem; padding: 0.6rem 0.5rem; }
+  .nav-button { font-size: 1.1rem; padding: 0.6rem 1.2rem; }
+
+  h2 { font-size: 1.8rem; }
+  h3 { font-size: 1.5rem; }
+  .display-label { font-size: 1.3rem; }
+  .time-value { font-size: 3.5rem; }
+
   .time-display { padding: 2rem 1rem; }
-  .q-text { font-size: 1rem; }
-  .draw-result { font-size: 2rem; }
+  .q-text { font-size: 1.25rem; }
+  .draw-result { font-size: 2.8rem; }
   .time-input {
     width: 80px !important; /* Adjust width for very small screens */
     box-sizing: border-box; /* 確保 box-sizing 應用於此 */
